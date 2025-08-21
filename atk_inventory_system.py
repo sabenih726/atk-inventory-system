@@ -333,7 +333,8 @@ def show_public_inventory():
     else:
         st.info("Belum ada data barang dalam sistem.")
 
-# Form Permintaan Publik (untuk karyawan)
+
+# Form Permintaan Publik (untuk karyawan) - Fixed Version
 def show_public_request_form():
     st.subheader("📝 Form Permintaan ATK")
     st.write("Isi form di bawah ini untuk mengajukan permintaan ATK")
@@ -346,7 +347,6 @@ def show_public_request_form():
         st.info("Silakan hubungi admin untuk informasi lebih lanjut.")
         return
     
-    # Move the form to wrap ALL form elements
     with st.form("public_request_form", clear_on_submit=True):
         st.markdown("### 👤 Informasi Pemohon")
         col1, col2 = st.columns(2)
@@ -369,11 +369,11 @@ def show_public_request_form():
         for _, row in available_barang.iterrows():
             option_text = f"{row['nama_barang']} (Stok: {row['stok']} {row['satuan']})"
             barang_options.append(option_text)
-            barang_dict[option_text] = row
+            barang_dict[option_text] = row.to_dict()  # Convert Series to dict
         
         selected_barang = st.selectbox("Pilih Barang*", barang_options)
         
-        # Initialize variables for form elements that depend on selection
+        # Initialize variables
         jumlah = 1
         keperluan = "Kebutuhan harian"
         catatan = ""
@@ -382,34 +382,36 @@ def show_public_request_form():
         
         if selected_barang and selected_barang != "-- Pilih Barang --":
             # Get selected item details
-            selected_item = barang_dict[selected_barang]
-            barang_nama = selected_item['nama_barang']
+            selected_item = barang_dict.get(selected_barang)  # Now it's a dict, not pandas Series
             
-            # Display stock info
-            st.info(f"📦 **{barang_nama}** - Stok tersedia: **{selected_item['stok']} {selected_item['satuan']}**")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                jumlah = st.number_input(
-                    f"Jumlah yang diminta ({selected_item['satuan']})*", 
-                    min_value=1, 
-                    max_value=int(selected_item['stok']),
-                    value=1
+            if selected_item:  # Now this check works properly
+                barang_nama = selected_item['nama_barang']
+                
+                # Display stock info
+                st.info(f"📦 **{barang_nama}** - Stok tersedia: **{selected_item['stok']} {selected_item['satuan']}**")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    jumlah = st.number_input(
+                        f"Jumlah yang diminta ({selected_item['satuan']})*", 
+                        min_value=1, 
+                        max_value=int(selected_item['stok']),
+                        value=1
+                    )
+                with col2:
+                    keperluan = st.selectbox("Keperluan*", [
+                        "Kebutuhan harian",
+                        "Project khusus", 
+                        "Meeting/Presentasi",
+                        "Training",
+                        "Event perusahaan",
+                        "Lainnya"
+                    ])
+                
+                catatan = st.text_area(
+                    "Catatan tambahan (opsional)", 
+                    placeholder="Jelaskan lebih detail keperluan atau catatan khusus..."
                 )
-            with col2:
-                keperluan = st.selectbox("Keperluan*", [
-                    "Kebutuhan harian",
-                    "Project khusus", 
-                    "Meeting/Presentasi",
-                    "Training",
-                    "Event perusahaan",
-                    "Lainnya"
-                ])
-            
-            catatan = st.text_area(
-                "Catatan tambahan (opsional)", 
-                placeholder="Jelaskan lebih detail keperluan atau catatan khusus..."
-            )
         else:
             st.info("👆 Pilih barang yang ingin diminta terlebih dahulu")
         
@@ -418,14 +420,14 @@ def show_public_request_form():
         
         # Handle form submission
         if submit:
-            # Validate required fields
-            if not nama_karyawan:
+            # Validate required fields - Fixed validation logic
+            if not nama_karyawan.strip():
                 st.error("❌ Nama lengkap harus diisi!")
             elif not divisi:
                 st.error("❌ Divisi/Departemen harus dipilih!")
             elif selected_barang == "-- Pilih Barang --":
                 st.error("❌ Silakan pilih barang yang ingin diminta!")
-            elif not selected_item:
+            elif selected_item is None:  # Now this check works properly
                 st.error("❌ Data barang tidak valid!")
             else:
                 # All validations passed, process the request
