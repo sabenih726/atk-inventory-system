@@ -581,11 +581,63 @@ def show_admin_dashboard():
         else:
             st.success("✅ Semua stok dalam kondisi aman!")
 
-# Halaman Kelola Permintaan (Admin)
+# Fixed version of get_all_requests() function
+def get_all_requests():
+    """Get all requests with proper column names"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Make sure to include barang_id in the SELECT statement
+    query = '''
+    SELECT 
+        p.id,
+        p.nama_karyawan,
+        p.divisi,
+        p.barang_id,          -- This is the missing column!
+        p.jumlah,
+        p.catatan,
+        p.status,
+        p.tanggal_permintaan,
+        p.tanggal_diproses,
+        p.processed_by,
+        p.alasan_tolak,
+        b.nama_barang,
+        b.stok as stok_tersedia,
+        b.satuan
+    FROM permintaan p
+    LEFT JOIN barang b ON p.barang_id = b.id
+    ORDER BY p.tanggal_permintaan DESC
+    '''
+    
+    cursor.execute(query)
+    results = cursor.fetchall()
+    
+    # Get column names from cursor description
+    columns = [description[0] for description in cursor.description]
+    
+    conn.close()
+    
+    if results:
+        df = pd.DataFrame(results, columns=columns)
+        return df
+    else:
+        # Return empty DataFrame with correct column structure
+        return pd.DataFrame(columns=columns)
+
+
+# Fixed show_manage_requests function with better error handling
 def show_manage_requests():
     st.title("📋 Kelola Permintaan ATK")
     
-    df = get_all_requests()
+    try:
+        df = get_all_requests()
+        
+        # Debug: Show available columns (remove this after fixing)
+        # st.write("Available columns:", list(df.columns))
+        
+    except Exception as e:
+        st.error(f"Error loading requests: {str(e)}")
+        return
     
     if not df.empty:
         # Filter
@@ -606,12 +658,12 @@ def show_manage_requests():
         if divisi_filter != "Semua":
             filtered_df = filtered_df[filtered_df['divisi'] == divisi_filter]
         if search_name:
-            filtered_df = filtered_df[filtered_df['nama_karyawan'].str.contains(search_name, case=False)]
+            filtered_df = filtered_df[filtered_df['nama_karyawan'].str.contains(search_name, case=False, na=False)]
         
         st.write(f"Menampilkan {len(filtered_df)} dari {len(df)} permintaan")
         
         # Display requests
-        for _, row in filtered_df.iterrows():
+        for idx, row in filtered_df.iterrows():
             status_emoji = {
                 'pending': '⏳',
                 'approved': '✅',
@@ -635,9 +687,9 @@ def show_manage_requests():
                         <h4>{status_emoji.get(row['status'], '❓')} {row['nama_barang']}</h4>
                         <p><strong>Pemohon:</strong> {row['nama_karyawan']} ({row['divisi']})</p>
                         <p><strong>Jumlah:</strong> {row['jumlah']} unit | <strong>Stok:</strong> {row['stok_tersedia']} unit</p>
-                        <p><strong>Tanggal:</strong> {row['tanggal_permintaan'][:16]}</p>
-                        {f"<p><strong>Catatan:</strong> {row['catatan']}</p>" if row['catatan'] else ""}
-                        {f"<p><strong>Alasan Ditolak:</strong> {row['alasan_tolak']}</p>" if row['alasan_tolak'] else ""}
+                        <p><strong>Tanggal:</strong> {str(row['tanggal_permintaan'])[:16]}</p>
+                        {f"<p><strong>Catatan:</strong> {row['catatan']}</p>" if pd.notna(row['catatan']) and row['catatan'] else ""}
+                        {f"<p><strong>Alasan Ditolak:</strong> {row['alasan_tolak']}</p>" if pd.notna(row['alasan_tolak']) and row['alasan_tolak'] else ""}
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -645,28 +697,35 @@ def show_manage_requests():
                     if row['status'] == 'pending':
                         if st.button(f"✅ Setujui", key=f"approve_{row['id']}"):
                             if row['jumlah'] <= row['stok_tersedia']:
-                                conn = get_connection()
-                                cursor = conn.cursor()
-                                
-                                # Update status permintaan
-                                cursor.execute('''
-                                    UPDATE permintaan 
-                                    SET status = 'approved', tanggal_diproses = ?, processed_by = ?
-                                    WHERE id = ?
-                                ''', (datetime.now(), st.session_state.admin_id, row['id']))
-                                
-                                # Kurangi stok
-                                cursor.execute('''
-                                    UPDATE barang 
-                                    SET stok = stok - ?, updated_at = ?
-                                    WHERE id = ?
-                                ''', (row['jumlah'], datetime.now(), row['barang_id']))
-                                
-                                conn.commit()
-                                conn.close()
-                                
-                                st.success("✅ Permintaan disetujui!")
-                                st.rerun()
+                                try:
+                                    conn = get_connection()
+                                    cursor = conn.cursor()
+                                    
+                                    # Update status permintaan
+                                    cursor.execute('''
+                                        UPDATE permintaan 
+                                        SET status = 'approved', tanggal_diproses = ?, processed_by = ?
+                                        WHERE id = ?
+                                    ''', (datetime.now().isoformat(), st.session_state.get('admin_id', 'admin'), row['id']))
+                                    
+                                    # Kurangi stok - Fixed: use proper column access
+                                    barang_id = row['barang_id']
+                                    jumlah = row['jumlah']
+                                    
+                                    cursor.execute('''
+                                        UPDATE barang 
+                                        SET stok = stok - ?, updated_at = ?
+                                        WHERE id = ?
+                                    ''', (jumlah, datetime.now().isoformat(), barang_id))
+                                    
+                                    conn.commit()
+                                    conn.close()
+                                    
+                                    st.success("✅ Permintaan disetujui!")
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"Error approving request: {str(e)}")
                             else:
                                 st.error("❌ Stok tidak mencukupi!")
                 
@@ -679,27 +738,37 @@ def show_manage_requests():
                 with col4:
                     if row['status'] == 'approved':
                         if st.button(f"✔️ Selesai", key=f"complete_{row['id']}"):
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            cursor.execute('''
-                                UPDATE permintaan 
-                                SET status = 'completed'
-                                WHERE id = ?
-                            ''', (row['id'],))
-                            conn.commit()
-                            conn.close()
-                            
-                            st.success("✔️ Permintaan diselesaikan!")
-                            st.rerun()
+                            try:
+                                conn = get_connection()
+                                cursor = conn.cursor()
+                                cursor.execute('''
+                                    UPDATE permintaan 
+                                    SET status = 'completed'
+                                    WHERE id = ?
+                                ''', (row['id'],))
+                                conn.commit()
+                                conn.close()
+                                
+                                st.success("✔️ Permintaan diselesaikan!")
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Error completing request: {str(e)}")
                 
-                # Rejection reason input
+                # Rejection reason input - Fixed form structure
                 if st.session_state.get(f"reject_reason_{row['id']}", False):
                     with st.form(f"reject_form_{row['id']}"):
-                        reason = st.text_input("Alasan penolakan:")
+                        reason = st.text_input("Alasan penolakan:", key=f"reason_input_{row['id']}")
                         col1, col2 = st.columns(2)
                         
                         with col1:
-                            if st.form_submit_button("Tolak dengan alasan"):
+                            submit_reject = st.form_submit_button("Tolak dengan alasan")
+                            
+                        with col2:
+                            cancel_reject = st.form_submit_button("Batal")
+                        
+                        if submit_reject:
+                            try:
                                 conn = get_connection()
                                 cursor = conn.cursor()
                                 cursor.execute('''
@@ -707,18 +776,27 @@ def show_manage_requests():
                                     SET status = 'rejected', tanggal_diproses = ?, 
                                         processed_by = ?, alasan_tolak = ?
                                     WHERE id = ?
-                                ''', (datetime.now(), st.session_state.admin_id, reason, row['id']))
+                                ''', (datetime.now().isoformat(), 
+                                     st.session_state.get('admin_id', 'admin'), 
+                                     reason, 
+                                     row['id']))
                                 conn.commit()
                                 conn.close()
                                 
-                                del st.session_state[f"reject_reason_{row['id']}"]
+                                # Clear the session state
+                                if f"reject_reason_{row['id']}" in st.session_state:
+                                    del st.session_state[f"reject_reason_{row['id']}"]
+                                
                                 st.success("❌ Permintaan ditolak!")
                                 st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Error rejecting request: {str(e)}")
                         
-                        with col2:
-                            if st.form_submit_button("Batal"):
+                        if cancel_reject:
+                            if f"reject_reason_{row['id']}" in st.session_state:
                                 del st.session_state[f"reject_reason_{row['id']}"]
-                                st.rerun()
+                            st.rerun()
                 
                 st.divider()
     else:
