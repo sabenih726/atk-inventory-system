@@ -346,6 +346,7 @@ def show_public_request_form():
         st.info("Silakan hubungi admin untuk informasi lebih lanjut.")
         return
     
+    # Move the form to wrap ALL form elements
     with st.form("public_request_form", clear_on_submit=True):
         st.markdown("### 👤 Informasi Pemohon")
         col1, col2 = st.columns(2)
@@ -361,17 +362,28 @@ def show_public_request_form():
         
         st.markdown("### 📦 Detail Permintaan")
         
-        # Pilih barang
-        barang_options = []
-        for _, row in available_barang.iterrows():
-            barang_options.append(f"{row['nama_barang']} (Stok: {row['stok']} {row['satuan']})")
+        # Pilih barang - Create options list
+        barang_options = ["-- Pilih Barang --"]
+        barang_dict = {}  # To store barang data for easy lookup
         
-        selected_barang = st.selectbox("Pilih Barang*", ["-- Pilih Barang --"] + barang_options)
+        for _, row in available_barang.iterrows():
+            option_text = f"{row['nama_barang']} (Stok: {row['stok']} {row['satuan']})"
+            barang_options.append(option_text)
+            barang_dict[option_text] = row
+        
+        selected_barang = st.selectbox("Pilih Barang*", barang_options)
+        
+        # Initialize variables for form elements that depend on selection
+        jumlah = 1
+        keperluan = "Kebutuhan harian"
+        catatan = ""
+        selected_item = None
+        barang_nama = ""
         
         if selected_barang and selected_barang != "-- Pilih Barang --":
             # Get selected item details
-            barang_nama = selected_barang.split(" (Stok:")[0]
-            selected_item = available_barang[available_barang['nama_barang'] == barang_nama].iloc[0]
+            selected_item = barang_dict[selected_barang]
+            barang_nama = selected_item['nama_barang']
             
             # Display stock info
             st.info(f"📦 **{barang_nama}** - Stok tersedia: **{selected_item['stok']} {selected_item['satuan']}**")
@@ -398,18 +410,32 @@ def show_public_request_form():
                 "Catatan tambahan (opsional)", 
                 placeholder="Jelaskan lebih detail keperluan atau catatan khusus..."
             )
-            
-            # Submit button
-            submit = st.form_submit_button("📤 Kirim Permintaan", type="primary")
-            
-            if submit:
-                if nama_karyawan and divisi and selected_barang != "-- Pilih Barang --":
+        else:
+            st.info("👆 Pilih barang yang ingin diminta terlebih dahulu")
+        
+        # Submit button - ALWAYS present in the form
+        submit = st.form_submit_button("📤 Kirim Permintaan", type="primary")
+        
+        # Handle form submission
+        if submit:
+            # Validate required fields
+            if not nama_karyawan:
+                st.error("❌ Nama lengkap harus diisi!")
+            elif not divisi:
+                st.error("❌ Divisi/Departemen harus dipilih!")
+            elif selected_barang == "-- Pilih Barang --":
+                st.error("❌ Silakan pilih barang yang ingin diminta!")
+            elif not selected_item:
+                st.error("❌ Data barang tidak valid!")
+            else:
+                # All validations passed, process the request
+                try:
                     conn = get_connection()
                     cursor = conn.cursor()
                     
                     # Gabungkan keperluan dengan catatan
                     full_catatan = f"Keperluan: {keperluan}"
-                    if catatan:
+                    if catatan.strip():
                         full_catatan += f"\nCatatan: {catatan}"
                     
                     cursor.execute('''
@@ -433,11 +459,9 @@ def show_public_request_form():
                     Permintaan Anda akan diproses oleh admin. Silakan hubungi admin untuk informasi lebih lanjut.
                     """)
                     st.balloons()
-                else:
-                    st.error("❌ Silakan lengkapi semua field yang bertanda *")
-        else:
-            st.info("👆 Pilih barang yang ingin diminta terlebih dahulu")
-
+                    
+                except Exception as e:
+                    st.error(f"❌ Terjadi kesalahan saat menyimpan permintaan: {str(e)}")
 # Login Admin
 def show_admin_login():
     st.subheader("👨‍💼 Login Admin")
