@@ -382,6 +382,10 @@ def show_public_request_form():
         
         selected_barang = st.selectbox("Pilih Barang*", ["-- Pilih Barang --"] + barang_options)
         
+        jumlah = 1
+        keperluan = "Kebutuhan harian"
+        catatan = ""
+        
         if selected_barang and selected_barang != "-- Pilih Barang --":
             # Get selected item details
             barang_nama = selected_barang.split(" (Stok:")[0]
@@ -412,45 +416,48 @@ def show_public_request_form():
                 "Catatan tambahan (opsional)", 
                 placeholder="Jelaskan lebih detail keperluan atau catatan khusus..."
             )
-            
-            # Submit button
-            submit = st.form_submit_button("📤 Kirim Permintaan", type="primary")
-            
-            if submit:
-                if nama_karyawan and divisi and selected_barang != "-- Pilih Barang --":
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    
-                    # Gabungkan keperluan dengan catatan
-                    full_catatan = f"Keperluan: {keperluan}"
-                    if catatan:
-                        full_catatan += f"\nCatatan: {catatan}"
-                    
-                    cursor.execute('''
-                        INSERT INTO permintaan (nama_karyawan, divisi, barang_id, jumlah, catatan)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (nama_karyawan, divisi, selected_item['id'], jumlah, full_catatan))
-                    
-                    conn.commit()
-                    conn.close()
-                    
-                    st.success(f"""
-                    ✅ **Permintaan berhasil dikirim!**
-                    
-                    **Detail Permintaan:**
-                    - **Nama:** {nama_karyawan}
-                    - **Divisi:** {divisi}
-                    - **Barang:** {barang_nama}
-                    - **Jumlah:** {jumlah} {selected_item['satuan']}
-                    - **Keperluan:** {keperluan}
-                    
-                    Permintaan Anda akan diproses oleh admin. Silakan hubungi admin untuk informasi lebih lanjut.
-                    """)
-                    st.balloons()
-                else:
-                    st.error("❌ Silakan lengkapi semua field yang bertanda *")
         else:
             st.info("👆 Pilih barang yang ingin diminta terlebih dahulu")
+        
+        submit = st.form_submit_button("📤 Kirim Permintaan", type="primary")
+        
+        if submit:
+            if nama_karyawan and divisi and selected_barang != "-- Pilih Barang --":
+                # Get selected item details again for submission
+                barang_nama = selected_barang.split(" (Stok:")[0]
+                selected_item = available_barang[available_barang['nama_barang'] == barang_nama].iloc[0]
+                
+                conn = get_connection()
+                cursor = conn.cursor()
+                
+                # Gabungkan keperluan dengan catatan
+                full_catatan = f"Keperluan: {keperluan}"
+                if catatan:
+                    full_catatan += f"\nCatatan: {catatan}"
+                
+                cursor.execute('''
+                    INSERT INTO permintaan (nama_karyawan, divisi, barang_id, jumlah, catatan)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (nama_karyawan, divisi, selected_item['id'], jumlah, full_catatan))
+                
+                conn.commit()
+                conn.close()
+                
+                st.success(f"""
+                ✅ **Permintaan berhasil dikirim!**
+                
+                **Detail Permintaan:**
+                - **Nama:** {nama_karyawan}
+                - **Divisi:** {divisi}
+                - **Barang:** {barang_nama}
+                - **Jumlah:** {jumlah} {selected_item['satuan']}
+                - **Keperluan:** {keperluan}
+                
+                Permintaan Anda akan diproses oleh admin. Silakan hubungi admin untuk informasi lebih lanjut.
+                """)
+                st.balloons()
+            else:
+                st.error("❌ Silakan lengkapi semua field yang bertanda *")
 
 # Login Admin
 def show_admin_login():
