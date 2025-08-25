@@ -3,6 +3,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import pandas as pd
 from datetime import datetime
+import requests
 import hashlib
 import io
 import os
