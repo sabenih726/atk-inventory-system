@@ -28,7 +28,7 @@ def get_db_connection():
             2. Dapatkan connection string dari Settings > Database
             3. Tambahkan ke secrets.toml:
             \`\`\`
-            DATABASE_URL = "postgresql://user:password@host:port/database"
+            DATABASE_URL = "postgresql://postgres:[Salamjuara12]@db.omuihllziolfoqhezxum.supabase.co:5432/postgres"
             \`\`\`
             """)
             st.stop()
