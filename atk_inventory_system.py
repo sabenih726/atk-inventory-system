@@ -676,7 +676,9 @@ elif menu == "Kelola Stok" and st.session_state.logged_in:
                 item_name = selected_item.split(" (Stok:")[0]
                 item_info = items_df[items_df['nama_barang'] == item_name].iloc[0]
                 
-                max_quantity = int(item_info['stok'])
+                current_stock = item_info['stok'] if item_info['stok'] is not None else 0
+                max_quantity = int(current_stock) if current_stock > 0 else 0
+                
                 if max_quantity > 0:
                     quantity = st.number_input("Jumlah Keluar", min_value=1, max_value=max_quantity, value=1)
                     reason = st.text_area("Keterangan", placeholder="Alasan pengurangan stok (rusak, hilang, dll)", key="stock_out_reason")
@@ -693,14 +695,20 @@ elif menu == "Kelola Stok" and st.session_state.logged_in:
             if submitted:
                 if selected_item == "-- Pilih Barang --":
                     st.error("Silakan pilih barang terlebih dahulu!")
-                elif item_info and int(item_info['stok']) <= 0:
-                    st.error("Stok barang ini sudah habis!")
-                elif not reason:
-                    st.error("Keterangan harus diisi!")
+                elif item_info is not None:
+                    current_stock = item_info['stok'] if item_info['stok'] is not None else 0
+                    if current_stock <= 0:
+                        st.error("Stok barang ini sudah habis!")
+                    elif not reason:
+                        st.error("Keterangan harus diisi!")
+                    elif quantity > current_stock:
+                        st.error(f"Jumlah keluar ({quantity}) tidak boleh lebih dari stok tersedia ({current_stock})")
+                    else:
+                        add_stock_transaction(item_info['id'], item_name, 'out', quantity, reason)
+                        st.success(f"Berhasil mengurangi {quantity} {item_info['satuan']} {item_name}")
+                        st.rerun()
                 else:
-                    add_stock_transaction(item_info['id'], item_name, 'out', quantity, reason)
-                    st.success(f"Berhasil mengurangi {quantity} {item_info['satuan']} {item_name}")
-                    st.rerun()
+                    st.error("Terjadi kesalahan dalam memproses data barang!")
 
 # Halaman Riwayat Transaksi
 elif menu == "Riwayat Transaksi" and st.session_state.logged_in:
