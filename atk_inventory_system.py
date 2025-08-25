@@ -6,37 +6,34 @@ from datetime import datetime
 import hashlib
 import io
 import os
+import supabase
+from supabase import create_client
 
-# Konfigurasi halaman
-st.set_page_config(
-    page_title="Sistem Inventori ATK",
-    page_icon="📦",
-    layout="wide"
-)
-
-def get_db_connection():
-    """Get PostgreSQL connection to Supabase"""
+def get_supabase_client():
+    """Get Supabase client using REST API"""
     try:
-        # Get connection details from Streamlit secrets or environment variables
-        db_url = st.secrets.get("DATABASE_URL") or os.getenv("DATABASE_URL")
-        
-        if not db_url:
-            st.error("❌ Database URL tidak ditemukan! Pastikan DATABASE_URL sudah diset di secrets.toml atau environment variables.")
+        url = st.secrets.get("SUPABASE_URL")
+        key = st.secrets.get("SUPABASE_KEY")
+
+        if not url or not key:
+            st.error("❌ Supabase URL atau API Key tidak ditemukan! Pastikan sudah diset di secrets.toml.")
             st.info("""
-            **Cara setup Supabase:**
-            1. Buat project di https://supabase.com
-            2. Dapatkan connection string dari Settings > Database
-            3. Tambahkan ke secrets.toml:
-            \`\`\`
-            DATABASE_URL = "postgresql://postgres:[Salamjuara12]@db.omuihllziolfoqhezxum.supabase.co:5432/postgres"
-            \`\`\`
+            **Cara setup Supabase REST API:**
+            1. Buka project di https://supabase.com
+            2. Masuk ke Settings > API
+            3. Salin Project URL dan Anon Key
+            4. Tambahkan ke secrets.toml:
+            ```
+            SUPABASE_URL = "https://xxxxx.supabase.co"
+            SUPABASE_KEY = "your-anon-key"
+            ```
             """)
             st.stop()
-            
-        conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
-        return conn
+
+        supabase = create_client(url, key)
+        return supabase
     except Exception as e:
-        st.error(f"❌ Gagal koneksi ke database: {str(e)}")
+        st.error(f"❌ Gagal koneksi ke Supabase REST API: {str(e)}")
         st.stop()
 
 def init_database():
