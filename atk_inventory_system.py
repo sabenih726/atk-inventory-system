@@ -158,14 +158,29 @@ def get_barang_list():
 
 def get_all_requests():
     conn = get_connection()
+    
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM permintaan")
+    total_requests = cursor.fetchone()[0]
+    print(f"Debug: Total requests in database: {total_requests}")
+    
+    cursor.execute("SELECT COUNT(*) FROM barang")
+    total_barang = cursor.fetchone()[0]
+    print(f"Debug: Total barang in database: {total_barang}")
+    
     df = pd.read_sql_query('''
         SELECT p.id, p.nama_karyawan, p.divisi, b.nama_barang, p.jumlah, 
                p.catatan, p.status, p.tanggal_permintaan, p.alasan_tolak,
-               b.stok as stok_tersedia
+               b.stok as stok_tersedia, p.barang_id
         FROM permintaan p
         JOIN barang b ON p.barang_id = b.id
         ORDER BY p.tanggal_permintaan DESC
     ''', conn)
+    
+    print(f"Debug: Query returned {len(df)} rows")
+    if len(df) > 0:
+        print(f"Debug: First row data: {df.iloc[0].to_dict()}")
+    
     conn.close()
     return df
 
@@ -619,9 +634,36 @@ def show_admin_dashboard():
 def show_manage_requests():
     st.title("📋 Kelola Permintaan ATK")
     
+    st.write("🔍 **Debug Information:**")
+    
+    # Check database directly
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT COUNT(*) FROM permintaan")
+    total_requests = cursor.fetchone()[0]
+    st.write(f"Total permintaan di database: {total_requests}")
+    
+    cursor.execute("SELECT COUNT(*) FROM barang")
+    total_barang = cursor.fetchone()[0]
+    st.write(f"Total barang di database: {total_barang}")
+    
+    # Show raw permintaan data
+    cursor.execute("SELECT * FROM permintaan ORDER BY tanggal_permintaan DESC LIMIT 5")
+    raw_requests = cursor.fetchall()
+    st.write(f"5 permintaan terbaru (raw data): {raw_requests}")
+    
+    conn.close()
+    
+    st.divider()
+    
     df = get_all_requests()
+    st.write(f"Data yang dikembalikan oleh get_all_requests(): {len(df)} rows")
     
     if not df.empty:
+        st.write("Preview data:")
+        st.dataframe(df.head())
+        
         # Filter
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -757,6 +799,10 @@ def show_manage_requests():
                 st.divider()
     else:
         st.info("Belum ada permintaan dalam sistem.")
+        st.write("Kemungkinan penyebab:")
+        st.write("1. Belum ada data yang disubmit")
+        st.write("2. Masalah JOIN query antara tabel permintaan dan barang")
+        st.write("3. Masalah koneksi database")
 
 # Halaman Kelola Barang (Admin)
 def show_manage_items():
