@@ -195,8 +195,6 @@ def get_requests(status_filter=None):
     """Ambil daftar permintaan dengan filter status"""
     try:
         with get_connection() as conn:
-            st.write("🔍 Debug: Mengambil data permintaan...")
-            
             query = """
                 SELECT p.id, p.nama_karyawan, p.divisi, b.nama_barang, p.jumlah, p.status,
                        p.tanggal_permintaan, p.catatan, p.alasan_tolak, b.stok as stok_tersedia,
@@ -209,45 +207,11 @@ def get_requests(status_filter=None):
                 query += f" WHERE p.status='{status_filter}'"
             query += " ORDER BY p.tanggal_permintaan DESC"
             
-            st.write(f"🔍 Debug Query: {query}")
-            
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM permintaan")
-            permintaan_count = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM barang")
-            barang_count = c.fetchone()[0]
-            
-            st.write(f"🔍 Debug: Jumlah permintaan di database: {permintaan_count}")
-            st.write(f"🔍 Debug: Jumlah barang di database: {barang_count}")
-            
-            if permintaan_count == 0:
-                st.warning("⚠️ Tidak ada data permintaan di database. Pastikan ada permintaan yang sudah diajukan.")
-                return pd.DataFrame()
-            
-            if barang_count == 0:
-                st.error("❌ Tidak ada data barang di database. Silakan tambahkan barang terlebih dahulu.")
-                return pd.DataFrame()
-            
             df = pd.read_sql_query(query, conn)
-            st.write(f"🔍 Debug: Berhasil mengambil {len(df)} baris data")
             return df
             
     except Exception as e:
-        st.error(f"❌ Error mengambil data permintaan: {e}")
-        st.write("🔍 Debug: Mencoba menampilkan struktur tabel...")
-        
-        try:
-            with get_connection() as conn:
-                c = conn.cursor()
-                c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='permintaan'")
-                table_structure = c.fetchone()
-                if table_structure:
-                    st.code(table_structure[0])
-                else:
-                    st.error("❌ Tabel 'permintaan' tidak ditemukan!")
-        except Exception as debug_e:
-            st.error(f"❌ Error saat debugging: {debug_e}")
-        
+        st.error(f"Error mengambil data permintaan: {e}")
         return pd.DataFrame()
 
 def validate_input(nama, divisi, jumlah):
@@ -521,32 +485,10 @@ def show_manage_requests():
     """Kelola permintaan dengan approval workflow"""
     st.subheader("✅ Kelola Permintaan")
     
-    st.write("🔍 Memeriksa koneksi database...")
-    try:
-        with get_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
-            table_count = c.fetchone()[0]
-            st.success(f"✅ Database terhubung. Jumlah tabel: {table_count}")
-    except Exception as e:
-        st.error(f"❌ Masalah koneksi database: {e}")
-        if st.button("🔧 Inisialisasi Ulang Database"):
-            init_database()
-            st.rerun()
-        return
-    
     status_filter = st.selectbox("Filter Status:", ["Semua", "pending", "approved", "rejected"])
     filter_status = None if status_filter == "Semua" else status_filter
     
-    show_debug = st.checkbox("🔍 Tampilkan Debug Info", value=False)
-    
-    if not show_debug:
-        debug_placeholder = st.empty()
-        with debug_placeholder:
-            df = get_requests(filter_status)
-        debug_placeholder.empty()
-    else:
-        df = get_requests(filter_status)
+    df = get_requests(filter_status)
     
     if df.empty:
         st.info("ℹ️ Tidak ada permintaan ditemukan")
@@ -1030,12 +972,6 @@ def add_sample_data():
 
 # ------------------ Main Application ------------------
 def main():
-    st.set_page_config(
-        page_title="Sistem Inventori ATK",
-        page_icon="📦",
-        layout="wide"
-    )
-    
     if 'db_initialized' not in st.session_state:
         st.write("🔄 Menginisialisasi database...")
         init_database()
