@@ -16,8 +16,8 @@ from supabase import create_client
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://omuihllziolfoqhezxum.supabase.co")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tdWlobGx6aW9sZm9xaGV6eHVtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NjExMTY4NCwiZXhwIjoyMDcxNjg3Njg0fQ.CdbaCPMBuI7xB5tEYzG1iQbKEMc7xosdhfKhWOt72v0")  # pakai service key untuk insert/update
 HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "apikey": sb_secret_0v3ElBKsarIv41hfSvHa6w_i7XqKojF,
+    "Authorization": f"Bearer {sb_secret_0v3ElBKsarIv41hfSvHa6w_i7XqKojF}",
     "Content-Type": "application/json"
 }
 
