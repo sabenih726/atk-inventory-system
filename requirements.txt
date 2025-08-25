@@ -3,3 +3,4 @@ pandas
 altair
 xlsxwriter
 plotly
+psycopg2-binary
