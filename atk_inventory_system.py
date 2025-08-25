@@ -28,25 +28,47 @@ HEADERS = {
 def get_all_items():
     url = f"{SUPABASE_URL}/rest/v1/items?select=*&order=nama_barang.asc"
     r = requests.get(url, headers=HEADERS)
-    r.raise_for_status()
+    if r.status_code != 200:
+        st.error(f"❌ Gagal mengambil data items: {r.status_code} - {r.text}")
+        return pd.DataFrame()
     return pd.DataFrame(r.json())
+
 
 def add_new_item(nama_barang, stok, satuan):
     url = f"{SUPABASE_URL}/rest/v1/items"
-    payload = {"nama_barang": nama_barang, "stok": stok, "satuan": satuan}
+    payload = {
+        "nama_barang": nama_barang,
+        "stok": stok,
+        "satuan": satuan
+    }
     r = requests.post(url, headers=HEADERS, json=payload)
-    return r.status_code == 201
+    if r.status_code not in [201, 200]:
+        st.error(f"❌ Gagal menambah item: {r.status_code} - {r.text}")
+        return False
+    return True
+
 
 def update_item(item_id, nama_barang, stok, satuan):
     url = f"{SUPABASE_URL}/rest/v1/items?id=eq.{item_id}"
-    payload = {"nama_barang": nama_barang, "stok": stok, "satuan": satuan}
+    payload = {
+        "nama_barang": nama_barang,
+        "stok": stok,
+        "satuan": satuan
+    }
     r = requests.patch(url, headers=HEADERS, json=payload)
-    return r.status_code == 204
+    if r.status_code != 204:
+        st.error(f"❌ Gagal update item: {r.status_code} - {r.text}")
+        return False
+    return True
+
 
 def delete_item(item_id):
     url = f"{SUPABASE_URL}/rest/v1/items?id=eq.{item_id}"
     r = requests.delete(url, headers=HEADERS)
-    return r.status_code == 204
+    if r.status_code != 204:
+        st.error(f"❌ Gagal hapus item: {r.status_code} - {r.text}")
+        return False
+    return True
 
 # ---------------------
 # Requests
@@ -178,35 +200,45 @@ if menu == "Form Permintaan ATK":
                 "Operations", "Sales", "Admin"
             ])
         
-        with col2:
-            st.subheader("📦 Detail Permintaan")
-            items_df = get_all_items()
-            item_options = ["-- Pilih Barang --"] + items_df['nama_barang'].tolist()
-            nama_barang = st.selectbox("Pilih Barang*", item_options)
-            
-            if nama_barang != "-- Pilih Barang --":
-                # Tampilkan stok tersedia
-                item_info = items_df[items_df['nama_barang'] == nama_barang].iloc[0]
-                st.info(f"Stok tersedia: {item_info['stok']} {item_info['satuan']}")
-                
-                jumlah = st.number_input("Jumlah*", min_value=1, max_value=int(item_info['stok']), value=1)
+with col2:
+    st.subheader("📦 Detail Permintaan")
+    items_df = get_all_items()
+
+    if items_df.empty:
+        st.warning("⚠️ Data barang tidak tersedia. Hubungi admin untuk menambahkan item.")
+        item_options = ["-- Pilih Barang --"]
+    else:
+        item_options = ["-- Pilih Barang --"] + items_df['nama_barang'].tolist()
+
+    nama_barang = st.selectbox("Pilih Barang*", item_options)
+
+    if nama_barang != "-- Pilih Barang --" and not items_df.empty:
+        # Tampilkan stok tersedia
+        item_info = items_df[items_df['nama_barang'] == nama_barang].iloc[0]
+        stok_saat_ini = int(item_info['stok']) if item_info['stok'] is not None else 0
+        st.info(f"Stok tersedia: {stok_saat_ini} {item_info['satuan']}")
+
+        jumlah = st.number_input("Jumlah*", min_value=1, max_value=stok_saat_ini if stok_saat_ini > 0 else 1, value=1)
+    else:
+        jumlah = 1
+
+keperluan = st.text_area("Keperluan/Keterangan", placeholder="Jelaskan untuk keperluan apa barang ini dibutuhkan")
+
+submitted = st.form_submit_button("🚀 Kirim Permintaan", use_container_width=True)
+
+if submitted:
+    if not nama_pemohon or divisi == "-- Pilih Divisi --" or nama_barang == "-- Pilih Barang --":
+        st.error("❌ Mohon lengkapi semua field yang wajib diisi!")
+    else:
+        try:
+            success = submit_request(nama_pemohon, divisi, nama_barang, jumlah, keperluan)
+            if success:
+                st.success("✅ Permintaan berhasil dikirim! Admin akan segera memproses permintaan Anda.")
+                st.balloons()
             else:
-                jumlah = 1
-        
-        keperluan = st.text_area("Keperluan/Keterangan", placeholder="Jelaskan untuk keperluan apa barang ini dibutuhkan")
-        
-        submitted = st.form_submit_button("🚀 Kirim Permintaan", use_container_width=True)
-        
-        if submitted:
-            if not nama_pemohon or divisi == "-- Pilih Divisi --" or nama_barang == "-- Pilih Barang --":
-                st.error("❌ Mohon lengkapi semua field yang wajib diisi!")
-            else:
-                try:
-                    submit_request(nama_pemohon, divisi, nama_barang, jumlah, keperluan)
-                    st.success("✅ Permintaan berhasil dikirim! Admin akan segera memproses permintaan Anda.")
-                    st.balloons()
-                except Exception as e:
-                    st.error(f"❌ Terjadi kesalahan: {str(e)}")
+                st.error("❌ Gagal mengirim permintaan ke server Supabase.")
+        except Exception as e:
+            st.error(f"❌ Terjadi kesalahan: {str(e)}")
 
 # Halaman Login Admin
 elif menu == "Login Admin":
