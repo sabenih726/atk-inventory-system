@@ -168,12 +168,24 @@ def get_all_requests():
     total_barang = cursor.fetchone()[0]
     print(f"Debug: Total barang in database: {total_barang}")
     
+    cursor.execute("SELECT barang_id, typeof(barang_id) FROM permintaan LIMIT 5")
+    permintaan_ids = cursor.fetchall()
+    print(f"Debug: Sample barang_id from permintaan: {permintaan_ids}")
+    
+    cursor.execute("SELECT id, typeof(id) FROM barang LIMIT 5")
+    barang_ids = cursor.fetchall()
+    print(f"Debug: Sample id from barang: {barang_ids}")
+    
+    cursor.execute("SELECT p.barang_id, b.id FROM permintaan p, barang b WHERE p.barang_id = b.id LIMIT 5")
+    join_test = cursor.fetchall()
+    print(f"Debug: JOIN test results: {join_test}")
+    
     df = pd.read_sql_query('''
         SELECT p.id, p.nama_karyawan, p.divisi, b.nama_barang, p.jumlah, 
                p.catatan, p.status, p.tanggal_permintaan, p.alasan_tolak,
                b.stok as stok_tersedia, p.barang_id
         FROM permintaan p
-        JOIN barang b ON p.barang_id = b.id
+        JOIN barang b ON CAST(p.barang_id AS INTEGER) = CAST(b.id AS INTEGER)
         ORDER BY p.tanggal_permintaan DESC
     ''', conn)
     
