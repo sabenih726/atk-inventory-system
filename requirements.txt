@@ -4,3 +4,4 @@ altair
 xlsxwriter
 plotly
 psycopg2-binary
+supabase
