@@ -501,287 +501,179 @@ elif menu == "Kelola Permintaan" and st.session_state.logged_in:
 # Halaman Kelola Barang
 elif menu == "Kelola Barang" and st.session_state.logged_in:
     st.title("📦 Kelola Barang")
-    
+
     tab1, tab2, tab3 = st.tabs(["Daftar Barang", "Tambah Barang Baru", "Edit/Hapus Barang"])
-    
+
+    # ---- Daftar Barang ----
     with tab1:
         items_df = get_all_items()
         if not items_df.empty:
             st.dataframe(items_df, use_container_width=True)
-            
-            # Summary statistics
+
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Total Jenis Barang", len(items_df))
             with col2:
-                total_stock = items_df['stok'].sum()
-                st.metric("Total Stok", total_stock)
+                st.metric("Total Stok", items_df['stok'].sum())
             with col3:
-                low_stock = len(items_df[items_df['stok'] <= 5])
-                st.metric("Stok Menipis (≤5)", low_stock)
+                st.metric("Stok Menipis (≤5)", len(items_df[items_df['stok'] <= 5]))
         else:
             st.info("Belum ada data barang")
-    
+
+    # ---- Tambah Barang Baru ----
     with tab2:
         st.subheader("➕ Tambah Barang Baru")
         with st.form("add_item_form"):
             nama_barang = st.text_input("Nama Barang*")
             stok = st.number_input("Stok Awal", min_value=0, value=0)
             satuan = st.selectbox("Satuan", ["pcs", "rim", "box", "pack", "unit", "lembar", "buah"])
-            
+
             if st.form_submit_button("➕ Tambah Barang"):
                 if nama_barang:
-                    # Check if item already exists
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id FROM items WHERE nama_barang = %s", (nama_barang,))
-                    existing = cursor.fetchone()
-                    
-                    if existing:
-                        st.error(f"Barang '{nama_barang}' sudah ada! Gunakan tab Edit/Hapus untuk mengubah data.")
-                        conn.close()
+                    # Cek apakah barang sudah ada di Supabase
+                    url = f"{SUPABASE_URL}/rest/v1/items?nama_barang=eq.{nama_barang}"
+                    r = requests.get(url, headers=HEADERS)
+                    if r.json():
+                        st.error(f"Barang '{nama_barang}' sudah ada!")
                     else:
                         add_new_item(nama_barang, stok, satuan)
                         st.success(f"Barang '{nama_barang}' berhasil ditambahkan!")
                         st.rerun()
                 else:
                     st.error("Nama barang harus diisi!")
-    
+
+    # ---- Edit / Hapus Barang ----
     with tab3:
         st.subheader("✏️ Edit/Hapus Barang")
         items_df = get_all_items()
-        
+
         if not items_df.empty:
-            # Select item to edit/delete
-            item_options = [f"{row['nama_barang']} (ID: {row['id']}, Stok: {row['stok']} {row['satuan']})" for _, row in items_df.iterrows()]
-            selected_item = st.selectbox("Pilih Barang untuk Edit/Hapus", ["-- Pilih Barang --"] + item_options)
-            
+            options = [f"{row['nama_barang']} (ID:{row['id']}, Stok:{row['stok']} {row['satuan']})" 
+                       for _, row in items_df.iterrows()]
+            selected_item = st.selectbox("Pilih Barang", ["-- Pilih Barang --"] + options)
+
             if selected_item != "-- Pilih Barang --":
-                # Extract item ID from selection
-                item_id = int(selected_item.split("ID: ")[1].split(",")[0])
+                item_id = int(selected_item.split("ID:")[1].split(",")[0])
                 item_data = items_df[items_df['id'] == item_id].iloc[0]
-                
-                # Show current data
-                st.write("**Data Saat Ini:**")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.write(f"**Nama:** {item_data['nama_barang']}")
-                with col2:
-                    st.write(f"**Stok:** {item_data['stok']}")
-                with col3:
-                    st.write(f"**Satuan:** {item_data['satuan']}")
-                
-                # Edit form
-                st.write("---")
-                st.subheader("✏️ Edit Barang")
+
+                # ---- Edit ----
+                st.write("**Data Saat Ini:**", item_data.to_dict())
                 with st.form("edit_item_form"):
                     new_nama = st.text_input("Nama Barang", value=item_data['nama_barang'])
                     new_stok = st.number_input("Stok", min_value=0, value=int(item_data['stok']))
-                    new_satuan = st.selectbox("Satuan", ["pcs", "rim", "box", "pack", "unit", "lembar", "buah"], 
-                                            index=["pcs", "rim", "box", "pack", "unit", "lembar", "buah"].index(item_data['satuan']) if item_data['satuan'] in ["pcs", "rim", "box", "pack", "unit", "lembar", "buah"] else 0)
-                    
+                    new_satuan = st.selectbox("Satuan", ["pcs","rim","box","pack","unit","lembar","buah"], 
+                                               index=["pcs","rim","box","pack","unit","lembar","buah"].index(item_data['satuan']) 
+                                               if item_data['satuan'] in ["pcs","rim","box","pack","unit","lembar","buah"] else 0)
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.form_submit_button("💾 Update Barang", type="primary"):
-                            if new_nama:
-                                conn = get_db_connection()
-                                cursor = conn.cursor()
-                                
-                                # Check if new name already exists (except current item)
-                                cursor.execute("SELECT id FROM items WHERE nama_barang = %s AND id != %s", (new_nama, item_id))
-                                existing = cursor.fetchone()
-                                
-                                if existing:
-                                    st.error(f"Nama barang '{new_nama}' sudah digunakan oleh barang lain!")
-                                    cursor.close()
-                                    conn.close()
-                                else:
-                                    # Update item
-                                    update_item(item_id, new_nama, new_stok, new_satuan)
-                                    st.success(f"Barang berhasil diupdate!")
-                                    st.rerun()
+                        if st.form_submit_button("💾 Update Barang"):
+                            # Cek duplikat nama
+                            url = f"{SUPABASE_URL}/rest/v1/items?nama_barang=eq.{new_nama}&id=neq.{item_id}"
+                            r = requests.get(url, headers=HEADERS)
+                            if r.json():
+                                st.error(f"Nama barang '{new_nama}' sudah dipakai!")
                             else:
-                                st.error("Nama barang tidak boleh kosong!")
-                    
+                                update_item(item_id, new_nama, new_stok, new_satuan)
+                                st.success("Barang berhasil diupdate!")
+                                st.rerun()
+
                     with col2:
-                        if st.form_submit_button("🗑️ Hapus Barang", type="secondary"):
-                            # Check if item has transactions or requests
-                            conn = get_db_connection()
-                            cursor = conn.cursor()
-                            
-                            cursor.execute("SELECT COUNT(*) FROM stock_transactions WHERE item_id = %s", (item_id,))
-                            transaction_count = cursor.fetchone()[0] if cursor.fetchone() else 0
-                            
-                            cursor.execute("SELECT COUNT(*) FROM requests WHERE nama_barang = %s", (item_data['nama_barang'],))
-                            request_count = cursor.fetchone()[0] if cursor.fetchone() else 0
-                            
-                            if transaction_count > 0 or request_count > 0:
-                                st.error(f"Tidak dapat menghapus barang ini karena memiliki {transaction_count} transaksi dan {request_count} permintaan. Hapus data terkait terlebih dahulu atau ubah stok menjadi 0.")
-                                cursor.close()
-                                conn.close()
+                        if st.form_submit_button("🗑️ Hapus Barang"):
+                            # Cek apakah barang masih ada transaksi/permintaan
+                            r1 = requests.get(f"{SUPABASE_URL}/rest/v1/stock_transactions?item_id=eq.{item_id}", headers=HEADERS)
+                            r2 = requests.get(f"{SUPABASE_URL}/rest/v1/requests?nama_barang=eq.{item_data['nama_barang']}", headers=HEADERS)
+                            if r1.json() or r2.json():
+                                st.error("Barang tidak bisa dihapus karena masih ada transaksi/permintaan.")
                             else:
                                 delete_item(item_id)
-                                st.success(f"Barang '{item_data['nama_barang']}' berhasil dihapus!")
+                                st.success("Barang berhasil dihapus!")
                                 st.rerun()
-                
-                # Bulk stock adjustment
+
+                # ---- Penyesuaian Stok ----
                 st.write("---")
                 st.subheader("📊 Penyesuaian Stok Cepat")
                 with st.form("adjust_stock_form"):
-                    st.write(f"Stok saat ini: **{item_data['stok']} {item_data['satuan']}**")
-                    adjustment_type = st.radio("Jenis Penyesuaian", ["Set ke nilai tertentu", "Tambah stok", "Kurangi stok"])
-                    
-                    if adjustment_type == "Set ke nilai tertentu":
-                        new_stock_value = st.number_input("Set stok ke", min_value=0, value=int(item_data['stok']))
-                        reason = st.text_input("Alasan penyesuaian", placeholder="Contoh: Penyesuaian stok fisik")
-                        
+                    st.write(f"Stok saat ini: {item_data['stok']} {item_data['satuan']}")
+                    adjustment_type = st.radio("Jenis Penyesuaian", ["Set Nilai", "Tambah", "Kurangi"])
+                    reason = st.text_input("Alasan")
+                    if adjustment_type == "Set Nilai":
+                        new_val = st.number_input("Set stok ke", min_value=0, value=int(item_data['stok']))
                         if st.form_submit_button("🔄 Set Stok"):
                             if reason:
-                                conn = get_db_connection()
-                                cursor = conn.cursor()
-                                
-                                # Calculate difference for transaction record
-                                difference = new_stock_value - int(item_data['stok'])
-                                
-                                # Update stock
-                                cursor.execute("UPDATE items SET stok = %s WHERE id = %s", (new_stock_value, item_id))
-                                
-                                # Record transaction
-                                if difference != 0:
-                                    transaction_type = 'in' if difference > 0 else 'out'
-                                    cursor.execute("""
-                                        INSERT INTO stock_transactions (item_id, nama_barang, transaction_type, quantity, reason, user_name)
-                                        VALUES (%s, %s, %s, %s, %s, %s)
-                                    """, (item_id, item_data['nama_barang'], transaction_type, abs(difference), f"Stock adjustment: {reason}", "Admin"))
-                                
-                                conn.commit()
-                                cursor.close()
-                                conn.close()
-                                st.success(f"Stok berhasil diset ke {new_stock_value} {item_data['satuan']}")
+                                update_item(item_id, item_data['nama_barang'], new_val, item_data['satuan'])
+                                if new_val != item_data['stok']:
+                                    diff = new_val - item_data['stok']
+                                    trx_type = "in" if diff > 0 else "out"
+                                    add_stock_transaction(item_id, item_data['nama_barang'], trx_type, abs(diff), f"Adjustment: {reason}")
+                                st.success("Stok berhasil diubah!")
                                 st.rerun()
                             else:
-                                st.error("Alasan penyesuaian harus diisi!")
-                    
-                    elif adjustment_type == "Tambah stok":
-                        add_amount = st.number_input("Jumlah yang ditambahkan", min_value=1, value=1)
-                        reason = st.text_input("Alasan penambahan", placeholder="Contoh: Pembelian baru")
-                        
-                        if st.form_submit_button("➕ Tambah Stok"):
+                                st.error("Alasan harus diisi!")
+
+                    elif adjustment_type == "Tambah":
+                        qty = st.number_input("Jumlah Tambah", min_value=1, value=1)
+                        if st.form_submit_button("➕ Tambah"):
                             if reason:
-                                add_stock_transaction(item_id, item_data['nama_barang'], 'in', add_amount, reason)
-                                st.success(f"Berhasil menambah {add_amount} {item_data['satuan']} ke stok")
+                                add_stock_transaction(item_id, item_data['nama_barang'], "in", qty, reason)
+                                st.success("Stok ditambahkan!")
                                 st.rerun()
                             else:
-                                st.error("Alasan penambahan harus diisi!")
-                    
-                    else:  # Kurangi stok
-                        max_reduce = int(item_data['stok'])
-                        if max_reduce > 0:
-                            reduce_amount = st.number_input("Jumlah yang dikurangi", min_value=1, max_value=max_reduce, value=1)
-                            reason = st.text_input("Alasan pengurangan", placeholder="Contoh: Barang rusak")
-                            
-                            if st.form_submit_button("➖ Kurangi Stok"):
-                                if reason:
-                                    add_stock_transaction(item_id, item_data['nama_barang'], 'out', reduce_amount, reason)
-                                    st.success(f"Berhasil mengurangi {reduce_amount} {item_data['satuan']} dari stok")
-                                    st.rerun()
-                                else:
-                                    st.error("Alasan pengurangan harus diisi!")
-                        else:
-                            st.warning("Stok sudah habis, tidak bisa dikurangi lagi")
-                            st.form_submit_button("➖ Kurangi Stok", disabled=True)
+                                st.error("Alasan harus diisi!")
+
+                    elif adjustment_type == "Kurangi":
+                        qty = st.number_input("Jumlah Kurangi", min_value=1, max_value=int(item_data['stok']), value=1)
+                        if st.form_submit_button("➖ Kurangi"):
+                            if reason:
+                                add_stock_transaction(item_id, item_data['nama_barang'], "out", qty, reason)
+                                st.success("Stok dikurangi!")
+                                st.rerun()
+                            else:
+                                st.error("Alasan harus diisi!")
         else:
-            st.info("Belum ada barang untuk diedit/dihapus")
+            st.info("Belum ada barang")
 
 # Halaman Kelola Stok
 elif menu == "Kelola Stok" and st.session_state.logged_in:
     st.title("📦 Kelola Stok")
-    
+
     tab1, tab2 = st.tabs(["Stok Masuk", "Stok Keluar"])
-    
+
+    # ---- Stok Masuk ----
     with tab1:
         st.subheader("➕ Tambah Stok Masuk")
         with st.form("stock_in_form"):
             items_df = get_all_items()
-            item_options = ["-- Pilih Barang --"] + [f"{row['nama_barang']} (Stok: {row['stok']} {row['satuan']})" for _, row in items_df.iterrows()]
-            selected_item = st.selectbox("Pilih Barang", item_options)
-            
-            quantity = 1
-            reason = ""
-            item_info = None
-            item_name = ""
-            
-            if selected_item != "-- Pilih Barang --":
-                item_name = selected_item.split(" (Stok:")[0]
-                item_info = items_df[items_df['nama_barang'] == item_name].iloc[0]
-                
-                quantity = st.number_input("Jumlah Masuk", min_value=1, value=1)
-                reason = st.text_area("Keterangan", placeholder="Alasan penambahan stok (pembelian, donasi, dll)")
-            else:
-                st.number_input("Jumlah Masuk", min_value=1, value=1, disabled=True, help="Pilih barang terlebih dahulu")
-                st.text_area("Keterangan", placeholder="Pilih barang terlebih dahulu", disabled=True)
-            
-            submitted = st.form_submit_button("Tambah Stok")
-            
-            if submitted:
-                if selected_item == "-- Pilih Barang --":
-                    st.error("Silakan pilih barang terlebih dahulu!")
-                elif not reason:
-                    st.error("Keterangan harus diisi!")
-                else:
-                    add_stock_transaction(item_info['id'], item_name, 'in', quantity, reason)
-                    st.success(f"Berhasil menambah {quantity} {item_info['satuan']} {item_name}")
-                    st.rerun()
-    
+            options = ["-- Pilih Barang --"] + [f"{row['nama_barang']} (Stok:{row['stok']} {row['satuan']})" for _, row in items_df.iterrows()]
+            selected = st.selectbox("Pilih Barang", options)
+            qty = st.number_input("Jumlah Masuk", min_value=1, value=1)
+            reason = st.text_area("Keterangan")
+            submitted = st.form_submit_button("Tambah")
+            if submitted and selected != "-- Pilih Barang --":
+                item_name = selected.split(" (")[0]
+                item = items_df[items_df['nama_barang'] == item_name].iloc[0]
+                add_stock_transaction(item['id'], item_name, "in", qty, reason)
+                st.success(f"{qty} {item['satuan']} {item_name} ditambahkan!")
+                st.rerun()
+
+    # ---- Stok Keluar ----
     with tab2:
         st.subheader("➖ Stok Keluar Manual")
         with st.form("stock_out_form"):
             items_df = get_all_items()
-            item_options = ["-- Pilih Barang --"] + [f"{row['nama_barang']} (Stok: {row['stok']} {row['satuan']})" for _, row in items_df.iterrows()]
-            selected_item = st.selectbox("Pilih Barang", item_options, key="stock_out_item")
-            
-            quantity = 1
-            reason = ""
-            item_info = None
-            item_name = ""
-            
-            if selected_item != "-- Pilih Barang --":
-                item_name = selected_item.split(" (Stok:")[0]
-                item_info = items_df[items_df['nama_barang'] == item_name].iloc[0]
-                
-                current_stock = item_info['stok'] if item_info['stok'] is not None else 0
-                max_quantity = int(current_stock) if current_stock > 0 else 0
-                
-                if max_quantity > 0:
-                    quantity = st.number_input("Jumlah Keluar", min_value=1, max_value=max_quantity, value=1)
-                    reason = st.text_area("Keterangan", placeholder="Alasan pengurangan stok (rusak, hilang, dll)", key="stock_out_reason")
+            options = ["-- Pilih Barang --"] + [f"{row['nama_barang']} (Stok:{row['stok']} {row['satuan']})" for _, row in items_df.iterrows()]
+            selected = st.selectbox("Pilih Barang", options, key="out")
+            qty = st.number_input("Jumlah Keluar", min_value=1, value=1)
+            reason = st.text_area("Keterangan")
+            submitted = st.form_submit_button("Kurangi")
+            if submitted and selected != "-- Pilih Barang --":
+                item_name = selected.split(" (")[0]
+                item = items_df[items_df['nama_barang'] == item_name].iloc[0]
+                if qty > item['stok']:
+                    st.error("Jumlah melebihi stok!")
                 else:
-                    st.warning("Stok barang ini sudah habis!")
-                    st.number_input("Jumlah Keluar", min_value=1, value=1, disabled=True)
-                    st.text_area("Keterangan", placeholder="Stok habis", disabled=True, key="stock_out_reason_disabled")
-            else:
-                st.number_input("Jumlah Keluar", min_value=1, value=1, disabled=True, help="Pilih barang terlebih dahulu")
-                st.text_area("Keterangan", placeholder="Pilih barang terlebih dahulu", disabled=True, key="stock_out_reason_placeholder")
-            
-            submitted = st.form_submit_button("Kurangi Stok")
-            
-            if submitted:
-                if selected_item == "-- Pilih Barang --":
-                    st.error("Silakan pilih barang terlebih dahulu!")
-                elif item_info is not None:
-                    current_stock = item_info['stok'] if item_info['stok'] is not None else 0
-                    if current_stock <= 0:
-                        st.error("Stok barang ini sudah habis!")
-                    elif not reason:
-                        st.error("Keterangan harus diisi!")
-                    elif quantity > current_stock:
-                        st.error(f"Jumlah keluar ({quantity}) tidak boleh lebih dari stok tersedia ({current_stock})")
-                    else:
-                        add_stock_transaction(item_info['id'], item_name, 'out', quantity, reason)
-                        st.success(f"Berhasil mengurangi {quantity} {item_info['satuan']} {item_name}")
-                        st.rerun()
-                else:
-                    st.error("Terjadi kesalahan dalam memproses data barang!")
+                    add_stock_transaction(item['id'], item_name, "out", qty, reason)
+                    st.success(f"{qty} {item['satuan']} {item_name} dikurangi!")
+                    st.rerun()
 
 # Halaman Riwayat Transaksi
 elif menu == "Riwayat Transaksi" and st.session_state.logged_in:
