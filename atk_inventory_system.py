@@ -360,7 +360,7 @@ def show_public_request_form():
         st.info("Silakan hubungi admin untuk informasi lebih lanjut.")
         return
     
-    with st.form("public_request_form", clear_on_submit=True):
+    with st.form("public_request_form"):
         st.markdown("### 👤 Informasi Pemohon")
         col1, col2 = st.columns(2)
         
@@ -422,10 +422,24 @@ def show_public_request_form():
         submit = st.form_submit_button("📤 Kirim Permintaan", type="primary")
         
         if submit:
-            if nama_karyawan and divisi and selected_barang != "-- Pilih Barang --":
+            st.write("🔄 Memproses permintaan...")
+            
+            if not nama_karyawan:
+                st.error("❌ Nama lengkap harus diisi!")
+                return
+            if not divisi:
+                st.error("❌ Divisi harus dipilih!")
+                return
+            if selected_barang == "-- Pilih Barang --":
+                st.error("❌ Barang harus dipilih!")
+                return
+                
+            try:
                 # Get selected item details again for submission
                 barang_nama = selected_barang.split(" (Stok:")[0]
                 selected_item = available_barang[available_barang['nama_barang'] == barang_nama].iloc[0]
+                
+                st.write(f"Debug: Inserting data - Nama: {nama_karyawan}, Divisi: {divisi}, Barang ID: {selected_item['id']}, Jumlah: {jumlah}")
                 
                 conn = get_connection()
                 cursor = conn.cursor()
@@ -441,12 +455,22 @@ def show_public_request_form():
                 ''', (nama_karyawan, divisi, selected_item['id'], jumlah, full_catatan))
                 
                 conn.commit()
+                
+                cursor.execute("SELECT last_insert_rowid()")
+                new_id = cursor.fetchone()[0]
+                st.write(f"Debug: Data berhasil disimpan dengan ID: {new_id}")
+                
+                cursor.execute("SELECT COUNT(*) FROM permintaan WHERE id = ?", (new_id,))
+                count = cursor.fetchone()[0]
+                st.write(f"Debug: Verifikasi data di database: {count} record ditemukan")
+                
                 conn.close()
                 
                 st.success(f"""
                 ✅ **Permintaan berhasil dikirim!**
                 
                 **Detail Permintaan:**
+                - **ID Permintaan:** {new_id}
                 - **Nama:** {nama_karyawan}
                 - **Divisi:** {divisi}
                 - **Barang:** {barang_nama}
@@ -456,8 +480,10 @@ def show_public_request_form():
                 Permintaan Anda akan diproses oleh admin. Silakan hubungi admin untuk informasi lebih lanjut.
                 """)
                 st.balloons()
-            else:
-                st.error("❌ Silakan lengkapi semua field yang bertanda *")
+                
+            except Exception as e:
+                st.error(f"❌ Terjadi kesalahan saat menyimpan data: {str(e)}")
+                st.write(f"Debug: Error details - {type(e).__name__}: {str(e)}")
 
 # Login Admin
 def show_admin_login():
@@ -491,8 +517,12 @@ def show_admin_dashboard():
     st.title("👨‍💼 Dashboard Admin")
     st.write(f"Selamat datang, **{st.session_state.admin_nama}**")
     
+    st.write("🔄 Memuat data dashboard...")
+    
     # Statistik
     total_barang, stok_menipis, pending_requests, monthly_requests = get_dashboard_stats()
+    
+    st.write(f"Debug: Total barang: {total_barang}, Stok menipis: {stok_menipis}, Pending: {pending_requests}, Monthly: {monthly_requests}")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -535,9 +565,16 @@ def show_admin_dashboard():
     with col1:
         st.subheader("⏳ Permintaan Pending")
         pending_df = get_all_requests()
+        
+        st.write(f"Debug: Total semua permintaan: {len(pending_df)}")
+        
         pending_df = pending_df[pending_df['status'] == 'pending']
+        st.write(f"Debug: Permintaan pending: {len(pending_df)}")
         
         if not pending_df.empty:
+            st.write("Debug: Data permintaan pending:")
+            st.dataframe(pending_df[['nama_karyawan', 'divisi', 'nama_barang', 'jumlah', 'tanggal_permintaan']])
+            
             for _, row in pending_df.head(5).iterrows():
                 st.markdown(f"""
                 <div class="status-pending" style="padding: 10px; margin: 5px 0; border-radius: 5px;">
@@ -551,6 +588,8 @@ def show_admin_dashboard():
                 st.info(f"Dan {len(pending_df) - 5} permintaan lainnya...")
         else:
             st.success("✅ Tidak ada permintaan pending.")
+            if st.button("🔄 Refresh Data"):
+                st.rerun()
     
     with col2:
         st.subheader("⚠️ Stok Menipis")
