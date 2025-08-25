@@ -9,301 +9,144 @@ import os
 import supabase
 from supabase import create_client
 
-def get_supabase_client():
-    """Get Supabase client using REST API"""
-    try:
-        url = st.secrets.get("SUPABASE_URL")
-        key = st.secrets.get("SUPABASE_KEY")
+# ---------------------
+# Konfigurasi Supabase
+# ---------------------
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://omuihllziolfoqhezxum.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tdWlobGx6aW9sZm9xaGV6eHVtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NjExMTY4NCwiZXhwIjoyMDcxNjg3Njg0fQ.CdbaCPMBuI7xB5tEYzG1iQbKEMc7xosdhfKhWOt72v0)  # pakai service key untuk insert/update
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
 
-        if not url or not key:
-            st.error("❌ Supabase URL atau API Key tidak ditemukan! Pastikan sudah diset di secrets.toml.")
-            st.info("""
-            **Cara setup Supabase REST API:**
-            1. Buka project di https://supabase.com
-            2. Masuk ke Settings > API
-            3. Salin Project URL dan Anon Key
-            4. Tambahkan ke secrets.toml:
-            ```
-            SUPABASE_URL = "https://xxxxx.supabase.co"
-            SUPABASE_KEY = "your-anon-key"
-            ```
-            """)
-            st.stop()
-
-        supabase = create_client(url, key)
-        return supabase
-    except Exception as e:
-        st.error(f"❌ Gagal koneksi ke Supabase REST API: {str(e)}")
-        st.stop()
-
-def init_database():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Tabel barang (items) - PostgreSQL syntax
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS items (
-            id SERIAL PRIMARY KEY,
-            nama_barang TEXT NOT NULL,
-            stok INTEGER DEFAULT 0,
-            satuan TEXT DEFAULT 'pcs',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Tabel permintaan (requests) - struktur sederhana
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS requests (
-            id SERIAL PRIMARY KEY,
-            nama_pemohon TEXT NOT NULL,
-            divisi TEXT NOT NULL,
-            nama_barang TEXT NOT NULL,
-            jumlah INTEGER NOT NULL,
-            keperluan TEXT,
-            status TEXT DEFAULT 'pending',
-            tanggal_request TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            tanggal_approve TIMESTAMP,
-            catatan_admin TEXT
-        )
-    ''')
-    
-    # Tabel admin
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS admin (
-            id SERIAL PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-    ''')
-    
-    # Tabel stock transactions
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS stock_transactions (
-            id SERIAL PRIMARY KEY,
-            item_id INTEGER NOT NULL,
-            nama_barang TEXT NOT NULL,
-            transaction_type TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            reason TEXT,
-            user_name TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (item_id) REFERENCES items (id)
-        )
-    ''')
-    
-    # Insert data barang contoh jika belum ada
-    cursor.execute("SELECT COUNT(*) FROM items")
-    if cursor.fetchone()[0] == 0:
-        sample_items = [
-            ('Pulpen Biru', 50, 'pcs'),
-            ('Pulpen Hitam', 30, 'pcs'),
-            ('Pensil 2B', 25, 'pcs'),
-            ('Kertas A4', 100, 'rim'),
-            ('Stapler', 5, 'pcs'),
-            ('Penghapus', 20, 'pcs'),
-            ('Penggaris', 15, 'pcs'),
-            ('Spidol Whiteboard', 10, 'pcs')
-        ]
-        cursor.executemany("INSERT INTO items (nama_barang, stok, satuan) VALUES (%s, %s, %s)", sample_items)
-    
-    # Insert admin default jika belum ada
-    cursor.execute("SELECT COUNT(*) FROM admin")
-    if cursor.fetchone()[0] == 0:
-        admin_password = hashlib.md5("admin123".encode()).hexdigest()
-        cursor.execute("INSERT INTO admin (username, password) VALUES (%s, %s)", ("admin", admin_password))
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
-
+# ---------------------
+# Items
+# ---------------------
 def get_all_items():
-    conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM items ORDER BY nama_barang", conn)
-    conn.close()
-    return df
-
-def get_all_requests():
-    conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM requests ORDER BY tanggal_request DESC", conn)
-    conn.close()
-    return df
-
-def submit_request(nama_pemohon, divisi, nama_barang, jumlah, keperluan):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO requests (nama_pemohon, divisi, nama_barang, jumlah, keperluan)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (nama_pemohon, divisi, nama_barang, jumlah, keperluan))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return True
-
-def update_request_status(request_id, status, catatan_admin=""):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get request details
-    cursor.execute("SELECT * FROM requests WHERE id = %s", (request_id,))
-    request = cursor.fetchone()
-    
-    if request and status == 'approved':
-        # Auto deduct stock
-        cursor.execute("SELECT id FROM items WHERE nama_barang = %s", (request['nama_barang'],))
-        item = cursor.fetchone()
-        
-        if item:
-            # Update item stock
-            cursor.execute("UPDATE items SET stok = stok - %s WHERE id = %s", 
-                         (request['jumlah'], item['id']))
-            
-            # Record transaction
-            cursor.execute("""
-                INSERT INTO stock_transactions (item_id, nama_barang, transaction_type, quantity, reason, user_name)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (item['id'], request['nama_barang'], 'out', request['jumlah'], 
-                  f"Approved request from {request['nama_pemohon']}", "Admin"))
-    
-    # Update request status
-    cursor.execute("""
-        UPDATE requests 
-        SET status = %s, tanggal_approve = CURRENT_TIMESTAMP, catatan_admin = %s
-        WHERE id = %s
-    """, (status, catatan_admin, request_id))
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-def add_stock_transaction(item_id, nama_barang, transaction_type, quantity, reason, user_name="Admin"):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Record transaction
-    cursor.execute("""
-        INSERT INTO stock_transactions (item_id, nama_barang, transaction_type, quantity, reason, user_name)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (item_id, nama_barang, transaction_type, quantity, reason, user_name))
-    
-    # Update item stock
-    if transaction_type == 'in':
-        cursor.execute("UPDATE items SET stok = stok + %s WHERE id = %s", (quantity, item_id))
-    else:  # transaction_type == 'out'
-        cursor.execute("UPDATE items SET stok = stok - %s WHERE id = %s", (quantity, item_id))
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-def get_stock_transactions():
-    conn = get_db_connection()
-    df = pd.read_sql_query("""
-        SELECT * FROM stock_transactions 
-        ORDER BY created_at DESC
-    """, conn)
-    conn.close()
-    return df
-
-def check_admin_login(username, password):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    hashed_password = hashlib.md5(password.encode()).hexdigest()
-    cursor.execute("SELECT * FROM admin WHERE username = %s AND password = %s", (username, hashed_password))
-    result = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return result is not None
+    url = f"{SUPABASE_URL}/rest/v1/items?select=*&order=nama_barang.asc"
+    r = requests.get(url, headers=HEADERS)
+    r.raise_for_status()
+    return pd.DataFrame(r.json())
 
 def add_new_item(nama_barang, stok, satuan):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO items (nama_barang, stok, satuan) VALUES (%s, %s, %s)", 
-                   (nama_barang, stok, satuan))
-    conn.commit()
-    cursor.close()
-    conn.close()
+    url = f"{SUPABASE_URL}/rest/v1/items"
+    payload = {"nama_barang": nama_barang, "stok": stok, "satuan": satuan}
+    r = requests.post(url, headers=HEADERS, json=payload)
+    return r.status_code == 201
 
 def update_item(item_id, nama_barang, stok, satuan):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get old item name for updating related records
-    cursor.execute("SELECT nama_barang FROM items WHERE id = %s", (item_id,))
-    old_item = cursor.fetchone()
-    old_nama = old_item['nama_barang'] if old_item else ""
-    
-    # Update item
-    cursor.execute("UPDATE items SET nama_barang = %s, stok = %s, satuan = %s WHERE id = %s", 
-                   (nama_barang, stok, satuan, item_id))
-    
-    # Update related records if name changed
-    if old_nama != nama_barang:
-        cursor.execute("UPDATE requests SET nama_barang = %s WHERE nama_barang = %s", 
-                       (nama_barang, old_nama))
-        cursor.execute("UPDATE stock_transactions SET nama_barang = %s WHERE nama_barang = %s", 
-                       (nama_barang, old_nama))
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
+    url = f"{SUPABASE_URL}/rest/v1/items?id=eq.{item_id}"
+    payload = {"nama_barang": nama_barang, "stok": stok, "satuan": satuan}
+    r = requests.patch(url, headers=HEADERS, json=payload)
+    return r.status_code == 204
 
 def delete_item(item_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM items WHERE id = %s", (item_id,))
-    conn.commit()
-    cursor.close()
-    conn.close()
+    url = f"{SUPABASE_URL}/rest/v1/items?id=eq.{item_id}"
+    r = requests.delete(url, headers=HEADERS)
+    return r.status_code == 204
 
-# Export dataframe to CSV
-def export_to_csv(df, filename):
-    """Export dataframe to CSV"""
-    csv = df.to_csv(index=False)
-    return csv
+# ---------------------
+# Requests
+# ---------------------
+def get_all_requests():
+    url = f"{SUPABASE_URL}/rest/v1/requests?select=*&order=tanggal_request.desc"
+    r = requests.get(url, headers=HEADERS)
+    r.raise_for_status()
+    return pd.DataFrame(r.json())
 
-# Import items from CSV file
+def submit_request(nama_pemohon, divisi, nama_barang, jumlah, keperluan):
+    url = f"{SUPABASE_URL}/rest/v1/requests"
+    payload = {
+        "nama_pemohon": nama_pemohon,
+        "divisi": divisi,
+        "nama_barang": nama_barang,
+        "jumlah": jumlah,
+        "keperluan": keperluan
+    }
+    r = requests.post(url, headers=HEADERS, json=payload)
+    return r.status_code == 201
+
+def update_request_status(request_id, status, catatan_admin=""):
+    url = f"{SUPABASE_URL}/rest/v1/requests?id=eq.{request_id}"
+    payload = {"status": status, "catatan_admin": catatan_admin}
+    if status == "approved":
+        payload["tanggal_approve"] = "now()"  # gunakan fungsi Postgres di Supabase
+    r = requests.patch(url, headers=HEADERS, json=payload)
+    return r.status_code == 204
+
+# ---------------------
+# Stock Transactions
+# ---------------------
+def add_stock_transaction(item_id, nama_barang, transaction_type, quantity, reason, user_name="Admin"):
+    # Tambah transaksi
+    url = f"{SUPABASE_URL}/rest/v1/stock_transactions"
+    payload = {
+        "item_id": item_id,
+        "nama_barang": nama_barang,
+        "transaction_type": transaction_type,
+        "quantity": quantity,
+        "reason": reason,
+        "user_name": user_name
+    }
+    r = requests.post(url, headers=HEADERS, json=payload)
+
+    # Update stok item
+    if transaction_type == "in":
+        patch_payload = {"stok": {"increment": quantity}}
+    else:
+        patch_payload = {"stok": {"decrement": quantity}}
+    requests.patch(f"{SUPABASE_URL}/rest/v1/items?id=eq.{item_id}", headers=HEADERS, json=patch_payload)
+
+    return r.status_code == 201
+
+def get_stock_transactions():
+    url = f"{SUPABASE_URL}/rest/v1/stock_transactions?select=*&order=created_at.desc"
+    r = requests.get(url, headers=HEADERS)
+    r.raise_for_status()
+    return pd.DataFrame(r.json())
+
+# ---------------------
+# Admin
+# ---------------------
+def check_admin_login(username, password):
+    hashed_password = hashlib.md5(password.encode()).hexdigest()
+    url = f"{SUPABASE_URL}/rest/v1/admin?username=eq.{username}&password=eq.{hashed_password}"
+    r = requests.get(url, headers=HEADERS)
+    return r.status_code == 200 and len(r.json()) > 0
+
+# ---------------------
+# Import / Export
+# ---------------------
+def export_to_csv(df, filename="export.csv"):
+    return df.to_csv(index=False)
+
 def import_items_from_csv(uploaded_file):
-    """Import items from CSV file"""
     try:
         df = pd.read_csv(uploaded_file)
-        required_columns = ['nama_barang', 'stok', 'satuan']
-        
-        if not all(col in df.columns for col in required_columns):
-            return False, f"File harus memiliki kolom: {', '.join(required_columns)}"
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
+        required = ["nama_barang", "stok", "satuan"]
+        if not all(col in df.columns for col in required):
+            return False, f"Kolom wajib: {', '.join(required)}"
+
         success_count = 0
         for _, row in df.iterrows():
-            try:
-                # Check if item already exists
-                cursor.execute("SELECT id FROM items WHERE nama_barang = %s", (row['nama_barang'],))
-                existing = cursor.fetchone()
-                
-                if existing:
-                    # Update existing item
-                    cursor.execute("UPDATE items SET stok = %s, satuan = %s WHERE nama_barang = %s", 
-                                 (row['stok'], row['satuan'], row['nama_barang']))
-                else:
-                    # Insert new item
-                    cursor.execute("INSERT INTO items (nama_barang, stok, satuan) VALUES (%s, %s, %s)", 
-                                 (row['nama_barang'], row['stok'], row['satuan']))
-                success_count += 1
-            except Exception as e:
-                continue
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
+            url = f"{SUPABASE_URL}/rest/v1/items?nama_barang=eq.{row['nama_barang']}"
+            r = requests.get(url, headers=HEADERS)
+            if r.json():  # jika ada → update
+                patch_url = f"{SUPABASE_URL}/rest/v1/items?nama_barang=eq.{row['nama_barang']}"
+                payload = {"stok": row["stok"], "satuan": row["satuan"]}
+                requests.patch(patch_url, headers=HEADERS, json=payload)
+            else:  # kalau tidak ada → insert
+                payload = {
+                    "nama_barang": row["nama_barang"],
+                    "stok": row["stok"],
+                    "satuan": row["satuan"]
+                }
+                requests.post(f"{SUPABASE_URL}/rest/v1/items", headers=HEADERS, json=payload)
+            success_count += 1
         return True, f"Berhasil import {success_count} item"
-        
     except Exception as e:
-        return False, f"Error: {str(e)}"
-
-# Inisialisasi database
-init_database()
+        return False, str(e)
 
 # Session state untuk login
 if 'logged_in' not in st.session_state:
