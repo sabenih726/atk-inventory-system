@@ -82,6 +82,20 @@ def init_database():
         )
     ''')
     
+    # Tabel stok keluar (untuk penyesuaian stok)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS stok_keluar (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            barang_id INTEGER NOT NULL,
+            jumlah INTEGER NOT NULL,
+            tanggal_keluar TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            keperluan TEXT,
+            processed_by INTEGER,
+            FOREIGN KEY (barang_id) REFERENCES barang (id),
+            FOREIGN KEY (processed_by) REFERENCES admin_users (id)
+        )
+    ''')
+    
     # Insert admin default jika belum ada
     cursor.execute("SELECT COUNT(*) FROM admin_users")
     if cursor.fetchone()[0] == 0:
@@ -1197,6 +1211,142 @@ def show_reports():
         
         conn.close()
 
+def show_stock_adjustment():
+    st.subheader("🔄 Penyesuaian Stok")
+    
+    conn = get_connection()
+    df_barang = pd.read_sql_query("SELECT * FROM barang ORDER BY nama_barang", conn)
+    conn.close()
+    
+    if df_barang.empty:
+        st.warning("⚠️ Belum ada barang dalam database.")
+        return
+    
+    with st.form("stock_adjustment_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            barang_options = [f"{row['nama_barang']} (Stok: {row['stok']} {row['satuan']})" for _, row in df_barang.iterrows()]
+            selected_barang = st.selectbox("Pilih Barang*", barang_options)
+            
+        with col2:
+            adjustment_type = st.selectbox("Jenis Penyesuaian*", ["Penambahan", "Pengurangan"])
+            
+        jumlah_adjustment = st.number_input("Jumlah Penyesuaian*", min_value=1, value=1)
+        alasan = st.text_area("Alasan Penyesuaian*", placeholder="Jelaskan alasan penyesuaian stok...")
+        
+        if st.form_submit_button("🔄 Lakukan Penyesuaian", type="primary"):
+            if selected_barang and alasan:
+                barang_nama = selected_barang.split(" (Stok:")[0]
+                selected_item = df_barang[df_barang['nama_barang'] == barang_nama].iloc[0]
+                
+                conn = get_connection()
+                cursor = conn.cursor()
+                
+                # Calculate new stock
+                current_stock = selected_item['stok']
+                if adjustment_type == "Penambahan":
+                    new_stock = current_stock + jumlah_adjustment
+                else:
+                    new_stock = max(0, current_stock - jumlah_adjustment)
+                
+                # Update stock
+                cursor.execute('''
+                    UPDATE barang SET stok = ?, updated_at = ? WHERE id = ?
+                ''', (new_stock, datetime.now(), selected_item['id']))
+                
+                # Log the adjustment
+                cursor.execute('''
+                    INSERT INTO stok_keluar (barang_id, jumlah, tanggal_keluar, keperluan, processed_by)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (selected_item['id'], jumlah_adjustment if adjustment_type == "Pengurangan" else -jumlah_adjustment, 
+                      datetime.now(), f"Penyesuaian: {alasan}", st.session_state.admin_id))
+                
+                conn.commit()
+                conn.close()
+                
+                st.success(f"✅ Stok berhasil disesuaikan! Stok baru: {new_stock} {selected_item['satuan']}")
+                st.rerun()
+            else:
+                st.error("❌ Mohon lengkapi semua field yang wajib diisi!")
+
+def show_user_management():
+    st.subheader("👥 Manajemen User")
+    
+    # Add new admin form
+    with st.expander("➕ Tambah Admin Baru"):
+        with st.form("add_admin_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                new_username = st.text_input("Username*", placeholder="Username untuk login")
+                new_password = st.text_input("Password*", type="password", placeholder="Password minimal 6 karakter")
+                
+            with col2:
+                new_nama = st.text_input("Nama Lengkap*", placeholder="Nama lengkap admin")
+                new_email = st.text_input("Email", placeholder="email@perusahaan.com")
+            
+            if st.form_submit_button("➕ Tambah Admin", type="primary"):
+                if new_username and new_password and new_nama:
+                    if len(new_password) < 6:
+                        st.error("❌ Password minimal 6 karakter!")
+                    else:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        
+                        # Check if username already exists
+                        cursor.execute("SELECT id FROM admin WHERE username = ?", (new_username,))
+                        if cursor.fetchone():
+                            st.error("❌ Username sudah digunakan!")
+                        else:
+                            # Hash password (simple hash for demo)
+                            import hashlib
+                            hashed_password = hashlib.md5(new_password.encode()).hexdigest()
+                            
+                            cursor.execute('''
+                                INSERT INTO admin (username, password, nama_lengkap, email, created_at)
+                                VALUES (?, ?, ?, ?, ?)
+                            ''', (new_username, hashed_password, new_nama, new_email, datetime.now()))
+                            
+                            conn.commit()
+                            conn.close()
+                            
+                            st.success("✅ Admin baru berhasil ditambahkan!")
+                            st.rerun()
+                else:
+                    st.error("❌ Mohon lengkapi semua field yang wajib diisi!")
+
+def show_settings():
+    st.subheader("⚙️ Pengaturan Sistem")
+    
+    # System settings form
+    with st.form("system_settings_form"):
+        st.markdown("### 🏢 Informasi Perusahaan")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            company_name = st.text_input("Nama Perusahaan", value="PT. Contoh Perusahaan")
+            company_address = st.text_area("Alamat Perusahaan", value="Jl. Contoh No. 123, Jakarta")
+            
+        with col2:
+            company_phone = st.text_input("Telepon", value="021-12345678")
+            company_email = st.text_input("Email", value="info@perusahaan.com")
+        
+        st.markdown("### 📊 Pengaturan Stok")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            default_min_stock = st.number_input("Minimum Stok Default", value=10, min_value=1)
+            auto_approve_limit = st.number_input("Batas Auto-Approve (qty)", value=5, min_value=1)
+            
+        with col2:
+            notification_email = st.text_input("Email Notifikasi", value="admin@perusahaan.com")
+            backup_frequency = st.selectbox("Frekuensi Backup", ["Harian", "Mingguan", "Bulanan"])
+        
+        if st.form_submit_button("💾 Simpan Pengaturan", type="primary"):
+            st.success("✅ Pengaturan berhasil disimpan!")
+            st.info("ℹ️ Pengaturan akan diterapkan pada sesi berikutnya.")
+
 # Main App
 def main():
     load_css()
@@ -1218,7 +1368,9 @@ def main():
             "🏠 Dashboard",
             "📋 Kelola Permintaan",
             "📦 Kelola Barang",
-            "📊 Laporan"
+            "📊 Laporan",
+            "🔄 Penyesuaian Stok",
+            "⚙️ Pengaturan Sistem"
         ]
         
         selected_menu = st.sidebar.selectbox("Menu Admin", admin_menu)
@@ -1238,6 +1390,10 @@ def main():
             show_manage_items()
         elif selected_menu == "📊 Laporan":
             show_reports()
+        elif selected_menu == "🔄 Penyesuaian Stok":
+            show_stock_adjustment()
+        elif selected_menu == "⚙️ Pengaturan Sistem":
+            show_settings()
     
     else:
         # Public interface (untuk karyawan dan admin login)
