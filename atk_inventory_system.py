@@ -633,20 +633,32 @@ elif menu == "Kelola Stok" and st.session_state.logged_in:
             item_options = ["-- Pilih Barang --"] + [f"{row['nama_barang']} (Stok: {row['stok']} {row['satuan']})" for _, row in items_df.iterrows()]
             selected_item = st.selectbox("Pilih Barang", item_options)
             
+            quantity = 1
+            reason = ""
+            item_info = None
+            item_name = ""
+            
             if selected_item != "-- Pilih Barang --":
                 item_name = selected_item.split(" (Stok:")[0]
                 item_info = items_df[items_df['nama_barang'] == item_name].iloc[0]
                 
                 quantity = st.number_input("Jumlah Masuk", min_value=1, value=1)
                 reason = st.text_area("Keterangan", placeholder="Alasan penambahan stok (pembelian, donasi, dll)")
-                
-                if st.form_submit_button("Tambah Stok"):
-                    if reason:
-                        add_stock_transaction(item_info['id'], item_name, 'in', quantity, reason)
-                        st.success(f"Berhasil menambah {quantity} {item_info['satuan']} {item_name}")
-                        st.rerun()
-                    else:
-                        st.error("Keterangan harus diisi!")
+            else:
+                st.number_input("Jumlah Masuk", min_value=1, value=1, disabled=True, help="Pilih barang terlebih dahulu")
+                st.text_area("Keterangan", placeholder="Pilih barang terlebih dahulu", disabled=True)
+            
+            submitted = st.form_submit_button("Tambah Stok")
+            
+            if submitted:
+                if selected_item == "-- Pilih Barang --":
+                    st.error("Silakan pilih barang terlebih dahulu!")
+                elif not reason:
+                    st.error("Keterangan harus diisi!")
+                else:
+                    add_stock_transaction(item_info['id'], item_name, 'in', quantity, reason)
+                    st.success(f"Berhasil menambah {quantity} {item_info['satuan']} {item_name}")
+                    st.rerun()
     
     with tab2:
         st.subheader("➖ Stok Keluar Manual")
@@ -654,6 +666,11 @@ elif menu == "Kelola Stok" and st.session_state.logged_in:
             items_df = get_all_items()
             item_options = ["-- Pilih Barang --"] + [f"{row['nama_barang']} (Stok: {row['stok']} {row['satuan']})" for _, row in items_df.iterrows()]
             selected_item = st.selectbox("Pilih Barang", item_options, key="stock_out_item")
+            
+            quantity = 1
+            reason = ""
+            item_info = None
+            item_name = ""
             
             if selected_item != "-- Pilih Barang --":
                 item_name = selected_item.split(" (Stok:")[0]
@@ -663,16 +680,27 @@ elif menu == "Kelola Stok" and st.session_state.logged_in:
                 if max_quantity > 0:
                     quantity = st.number_input("Jumlah Keluar", min_value=1, max_value=max_quantity, value=1)
                     reason = st.text_area("Keterangan", placeholder="Alasan pengurangan stok (rusak, hilang, dll)", key="stock_out_reason")
-                    
-                    if st.form_submit_button("Kurangi Stok"):
-                        if reason:
-                            add_stock_transaction(item_info['id'], item_name, 'out', quantity, reason)
-                            st.success(f"Berhasil mengurangi {quantity} {item_info['satuan']} {item_name}")
-                            st.rerun()
-                        else:
-                            st.error("Keterangan harus diisi!")
                 else:
                     st.warning("Stok barang ini sudah habis!")
+                    st.number_input("Jumlah Keluar", min_value=1, value=1, disabled=True)
+                    st.text_area("Keterangan", placeholder="Stok habis", disabled=True, key="stock_out_reason_disabled")
+            else:
+                st.number_input("Jumlah Keluar", min_value=1, value=1, disabled=True, help="Pilih barang terlebih dahulu")
+                st.text_area("Keterangan", placeholder="Pilih barang terlebih dahulu", disabled=True, key="stock_out_reason_placeholder")
+            
+            submitted = st.form_submit_button("Kurangi Stok")
+            
+            if submitted:
+                if selected_item == "-- Pilih Barang --":
+                    st.error("Silakan pilih barang terlebih dahulu!")
+                elif item_info and int(item_info['stok']) <= 0:
+                    st.error("Stok barang ini sudah habis!")
+                elif not reason:
+                    st.error("Keterangan harus diisi!")
+                else:
+                    add_stock_transaction(item_info['id'], item_name, 'out', quantity, reason)
+                    st.success(f"Berhasil mengurangi {quantity} {item_info['satuan']} {item_name}")
+                    st.rerun()
 
 # Halaman Riwayat Transaksi
 elif menu == "Riwayat Transaksi" and st.session_state.logged_in:
