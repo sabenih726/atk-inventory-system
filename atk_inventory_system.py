@@ -195,6 +195,8 @@ def get_requests(status_filter=None):
     """Ambil daftar permintaan dengan filter status"""
     try:
         with get_connection() as conn:
+            st.write("🔍 Debug: Mengambil data permintaan...")
+            
             query = """
                 SELECT p.id, p.nama_karyawan, p.divisi, b.nama_barang, p.jumlah, p.status,
                        p.tanggal_permintaan, p.catatan, p.alasan_tolak, b.stok as stok_tersedia,
@@ -207,10 +209,45 @@ def get_requests(status_filter=None):
                 query += f" WHERE p.status='{status_filter}'"
             query += " ORDER BY p.tanggal_permintaan DESC"
             
+            st.write(f"🔍 Debug Query: {query}")
+            
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM permintaan")
+            permintaan_count = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM barang")
+            barang_count = c.fetchone()[0]
+            
+            st.write(f"🔍 Debug: Jumlah permintaan di database: {permintaan_count}")
+            st.write(f"🔍 Debug: Jumlah barang di database: {barang_count}")
+            
+            if permintaan_count == 0:
+                st.warning("⚠️ Tidak ada data permintaan di database. Pastikan ada permintaan yang sudah diajukan.")
+                return pd.DataFrame()
+            
+            if barang_count == 0:
+                st.error("❌ Tidak ada data barang di database. Silakan tambahkan barang terlebih dahulu.")
+                return pd.DataFrame()
+            
             df = pd.read_sql_query(query, conn)
+            st.write(f"🔍 Debug: Berhasil mengambil {len(df)} baris data")
             return df
+            
     except Exception as e:
-        st.error(f"Error mengambil data permintaan: {e}")
+        st.error(f"❌ Error mengambil data permintaan: {e}")
+        st.write("🔍 Debug: Mencoba menampilkan struktur tabel...")
+        
+        try:
+            with get_connection() as conn:
+                c = conn.cursor()
+                c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='permintaan'")
+                table_structure = c.fetchone()
+                if table_structure:
+                    st.code(table_structure[0])
+                else:
+                    st.error("❌ Tabel 'permintaan' tidak ditemukan!")
+        except Exception as debug_e:
+            st.error(f"❌ Error saat debugging: {debug_e}")
+        
         return pd.DataFrame()
 
 def validate_input(nama, divisi, jumlah):
@@ -232,10 +269,8 @@ def update_stok(barang_id, jumlah_keluar, admin_id, permintaan_id=None):
         with get_connection() as conn:
             c = conn.cursor()
             
-            # Update stok barang
             c.execute("UPDATE barang SET stok = stok - ? WHERE id = ?", (jumlah_keluar, barang_id))
             
-            # Catat stok keluar
             c.execute("""
                 INSERT INTO stok_keluar (barang_id, jumlah, permintaan_id, tanggal_keluar, admin_id)
                 VALUES (?, ?, ?, ?, ?)
@@ -257,14 +292,12 @@ def show_public_inventory():
         st.info("Belum ada data barang")
         return
     
-    # Filter berdasarkan kategori
     kategoris = df['kategori'].unique().tolist()
     kategori_filter = st.selectbox("Filter berdasarkan kategori:", ["Semua"] + kategoris)
     
     if kategori_filter != "Semua":
         df = df[df['kategori'] == kategori_filter]
     
-    # Tampilkan dalam format cards
     cols = st.columns(3)
     for idx, (_, row) in enumerate(df.iterrows()):
         col = cols[idx % 3]
@@ -332,7 +365,6 @@ def show_public_request_form():
                 selected_idx = barang_options.index(barang_selected)
                 selected_barang = df_available.iloc[selected_idx]
                 
-                # Cek stok terbaru
                 current_df = get_barang_list()
                 current_barang = current_df[current_df['id'] == selected_barang['id']].iloc[0]
                 
@@ -431,7 +463,6 @@ def show_admin_dashboard():
     """Dashboard admin lengkap"""
     admin = st.session_state.admin
     
-    # Header
     col1, col2 = st.columns([3, 1])
     with col1:
         st.title(f"👋 Selamat datang, {admin['nama']}")
@@ -440,7 +471,6 @@ def show_admin_dashboard():
             del st.session_state.admin
             st.rerun()
     
-    # Menu tabs
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "✅ Kelola Permintaan", "📦 Kelola Barang", "📈 Laporan"])
     
     with tab1:
@@ -459,20 +489,12 @@ def show_dashboard_overview():
     """Dashboard overview dengan statistik"""
     st.subheader("📊 Overview Sistem")
     
-    # Statistik cards
     col1, col2, col3, col4 = st.columns(4)
     
     with get_connection() as conn:
-        # Total barang
         total_barang = pd.read_sql_query("SELECT COUNT(*) as count FROM barang", conn).iloc[0]['count']
-        
-        # Barang habis
         barang_habis = pd.read_sql_query("SELECT COUNT(*) as count FROM barang WHERE stok = 0", conn).iloc[0]['count']
-        
-        # Barang menipis
         barang_menipis = pd.read_sql_query("SELECT COUNT(*) as count FROM barang WHERE stok <= minimum_stok AND stok > 0", conn).iloc[0]['count']
-        
-        # Permintaan pending
         pending_requests = pd.read_sql_query("SELECT COUNT(*) as count FROM permintaan WHERE status = 'pending'", conn).iloc[0]['count']
     
     with col1:
@@ -484,7 +506,6 @@ def show_dashboard_overview():
     with col4:
         st.metric("Permintaan Pending", pending_requests, "⏳")
     
-    # Alert untuk barang habis/menipis
     df = get_barang_list()
     barang_alert = df[(df['stok'] == 0) | (df['stok'] <= df['minimum_stok'])]
     
@@ -500,17 +521,58 @@ def show_manage_requests():
     """Kelola permintaan dengan approval workflow"""
     st.subheader("✅ Kelola Permintaan")
     
-    # Filter status
+    st.write("🔍 Memeriksa koneksi database...")
+    try:
+        with get_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+            table_count = c.fetchone()[0]
+            st.success(f"✅ Database terhubung. Jumlah tabel: {table_count}")
+    except Exception as e:
+        st.error(f"❌ Masalah koneksi database: {e}")
+        if st.button("🔧 Inisialisasi Ulang Database"):
+            init_database()
+            st.rerun()
+        return
+    
     status_filter = st.selectbox("Filter Status:", ["Semua", "pending", "approved", "rejected"])
     filter_status = None if status_filter == "Semua" else status_filter
     
-    df = get_requests(filter_status)
+    show_debug = st.checkbox("🔍 Tampilkan Debug Info", value=False)
+    
+    if not show_debug:
+        debug_placeholder = st.empty()
+        with debug_placeholder:
+            df = get_requests(filter_status)
+        debug_placeholder.empty()
+    else:
+        df = get_requests(filter_status)
     
     if df.empty:
-        st.info("Tidak ada permintaan")
+        st.info("ℹ️ Tidak ada permintaan ditemukan")
+        
+        st.markdown("""
+        ### Kemungkinan penyebab:
+        1. **Belum ada permintaan yang diajukan** - Coba ajukan permintaan dari menu karyawan
+        2. **Database belum diinisialisasi** - Klik tombol di bawah untuk inisialisasi ulang
+        3. **Filter terlalu ketat** - Coba ubah filter status ke "Semua"
+        """)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔧 Inisialisasi Ulang Database"):
+                init_database()
+                st.success("Database berhasil diinisialisasi ulang!")
+                st.rerun()
+        
+        with col2:
+            if st.button("📝 Tambah Data Sample"):
+                add_sample_data()
+                st.success("Data sample berhasil ditambahkan!")
+                st.rerun()
+        
         return
     
-    # Tampilkan permintaan pending terlebih dahulu
     if filter_status is None or filter_status == "pending":
         pending_df = df[df['status'] == 'pending']
         
@@ -533,21 +595,18 @@ def show_manage_requests():
                         st.write(f"**Stok Tersedia:** {row['stok_tersedia']}")
                         st.write(f"**Tanggal:** {row['tanggal_permintaan']}")
                         
-                        # Cek apakah stok mencukupi
                         if row['stok_tersedia'] >= row['jumlah']:
                             st.success("✅ Stok mencukupi")
                         else:
                             st.error("❌ Stok tidak mencukupi")
                     
                     with col3:
-                        # Tombol approve
                         if st.button("✅ Setujui", key=f"approve_{row['id']}", 
                                    disabled=row['stok_tersedia'] < row['jumlah']):
                             if approve_request(row['id'], st.session_state.admin['id']):
                                 st.success("Permintaan disetujui!")
                                 st.rerun()
                         
-                        # Form reject dengan alasan
                         with st.form(f"reject_form_{row['id']}"):
                             alasan = st.text_area("Alasan penolakan:", key=f"reason_{row['id']}")
                             if st.form_submit_button("❌ Tolak"):
@@ -558,10 +617,8 @@ def show_manage_requests():
                                 else:
                                     st.error("Alasan penolakan harus diisi!")
     
-    # Tampilkan riwayat semua permintaan
     st.subheader("📋 Riwayat Permintaan")
     
-    # Display dataframe dengan formatting
     display_df = df.copy()
     display_df = display_df[['id', 'nama_karyawan', 'divisi', 'nama_barang', 'jumlah', 
                             'status', 'tanggal_permintaan', 'processed_by_name']]
@@ -575,7 +632,6 @@ def approve_request(request_id, admin_id):
         with get_connection() as conn:
             c = conn.cursor()
             
-            # Ambil detail permintaan
             c.execute("""
                 SELECT p.*, b.stok 
                 FROM permintaan p 
@@ -588,14 +644,12 @@ def approve_request(request_id, admin_id):
                 st.error("Stok tidak mencukupi!")
                 return False
             
-            # Update status permintaan
             c.execute("""
                 UPDATE permintaan 
                 SET status = 'approved', tanggal_diproses = ?, processed_by = ?
                 WHERE id = ?
             """, (datetime.now(), admin_id, request_id))
             
-            # Update stok dan catat pengeluaran
             if update_stok(request_data['barang_id'], request_data['jumlah'], admin_id, request_id):
                 conn.commit()
                 return True
@@ -684,7 +738,6 @@ def show_items_list():
         st.info("Belum ada data barang")
         return
     
-    # Filter dan pencarian
     col1, col2 = st.columns(2)
     with col1:
         search = st.text_input("🔍 Cari barang:", placeholder="Ketik nama barang...")
@@ -692,14 +745,12 @@ def show_items_list():
         kategori_filter = st.selectbox("Filter kategori:", 
                                      ["Semua"] + df['kategori'].unique().tolist())
     
-    # Apply filters
     filtered_df = df.copy()
     if search:
         filtered_df = filtered_df[filtered_df['nama_barang'].str.contains(search, case=False, na=False)]
     if kategori_filter != "Semua":
         filtered_df = filtered_df[filtered_df['kategori'] == kategori_filter]
     
-    # Tampilkan tabel dengan opsi edit
     for _, row in filtered_df.iterrows():
         with st.expander(f"{row['nama_barang']} - Stok: {row['stok']} {row['satuan']}"):
             col1, col2, col3 = st.columns([2, 2, 1])
@@ -714,7 +765,6 @@ def show_items_list():
                 st.write(f"**Minimum Stok:** {row['minimum_stok']}")
                 st.write(f"**Harga Satuan:** Rp {row['harga_satuan']:,.2f}")
                 
-                # Status stok
                 if row['stok'] == 0:
                     st.error("🔴 HABIS")
                 elif row['stok'] <= row['minimum_stok']:
@@ -723,7 +773,6 @@ def show_items_list():
                     st.success("🟢 TERSEDIA")
             
             with col3:
-                # Form edit cepat untuk minimum stok dan harga
                 with st.form(f"quick_edit_{row['id']}"):
                     new_min_stok = st.number_input("Min Stok:", value=row['minimum_stok'], key=f"min_{row['id']}")
                     new_harga = st.number_input("Harga:", value=row['harga_satuan'], format="%.2f", key=f"price_{row['id']}")
@@ -758,7 +807,6 @@ def show_stock_in_form():
         
         if st.form_submit_button("📦 Tambah Stok", use_container_width=True):
             if selected_barang and jumlah_masuk > 0:
-                # Ambil data barang yang dipilih
                 selected_idx = barang_options.index(selected_barang)
                 barang_data = df.iloc[selected_idx]
                 
@@ -768,7 +816,6 @@ def show_stock_in_form():
                     with get_connection() as conn:
                         c = conn.cursor()
                         
-                        # Insert ke stok_masuk
                         c.execute("""
                             INSERT INTO stok_masuk (barang_id, jumlah, harga_satuan, total_harga, 
                                                    supplier, tanggal_masuk, catatan, admin_id)
@@ -776,11 +823,9 @@ def show_stock_in_form():
                         """, (barang_data['id'], jumlah_masuk, harga_satuan, total_harga,
                               supplier or None, tanggal_masuk, catatan or None, st.session_state.admin['id']))
                         
-                        # Update stok barang
                         c.execute("UPDATE barang SET stok = stok + ? WHERE id = ?", 
                                 (jumlah_masuk, barang_data['id']))
                         
-                        # Update harga satuan jika diisi
                         if harga_satuan > 0:
                             c.execute("UPDATE barang SET harga_satuan = ? WHERE id = ?", 
                                     (harga_satuan, barang_data['id']))
@@ -829,24 +874,19 @@ def show_summary_report():
     
     try:
         with get_connection() as conn:
-            # Statistik dasar
             col1, col2, col3, col4 = st.columns(4)
             
-            # Total barang
             total_barang = pd.read_sql_query("SELECT COUNT(*) as count FROM barang", conn).iloc[0]['count']
             
-            # Total nilai inventori
             total_nilai = pd.read_sql_query("""
                 SELECT SUM(stok * harga_satuan) as total FROM barang WHERE harga_satuan > 0
             """, conn).iloc[0]['total'] or 0
             
-            # Total permintaan bulan ini
             permintaan_bulan = pd.read_sql_query("""
                 SELECT COUNT(*) as count FROM permintaan 
                 WHERE strftime('%Y-%m', tanggal_permintaan) = strftime('%Y-%m', 'now')
             """, conn).iloc[0]['count']
             
-            # Permintaan disetujui bulan ini
             approved_bulan = pd.read_sql_query("""
                 SELECT COUNT(*) as count FROM permintaan 
                 WHERE status = 'approved' 
@@ -869,7 +909,6 @@ def show_stock_in_report():
     """Laporan stok masuk"""
     st.subheader("📋 Laporan Stok Masuk")
     
-    # Filter tanggal
     col1, col2 = st.columns(2)
     with col1:
         start_date = st.date_input("Dari Tanggal:", value=date.today().replace(day=1))
@@ -892,7 +931,6 @@ def show_stock_in_report():
             if stock_in_data.empty:
                 st.info("Tidak ada data stok masuk dalam periode tersebut")
             else:
-                # Ringkasan
                 total_transaksi = len(stock_in_data)
                 total_nilai = stock_in_data['total_harga'].sum()
                 
@@ -902,10 +940,8 @@ def show_stock_in_report():
                 with col2:
                     st.metric("Total Nilai", f"Rp {total_nilai:,.0f}")
                 
-                # Tabel detail
                 st.dataframe(stock_in_data, use_container_width=True)
                 
-                # Export CSV
                 csv = stock_in_data.to_csv(index=False)
                 st.download_button(
                     label="📥 Download CSV",
@@ -921,7 +957,6 @@ def show_stock_out_report():
     """Laporan stok keluar"""
     st.subheader("📤 Laporan Stok Keluar")
     
-    # Filter tanggal
     col1, col2 = st.columns(2)
     with col1:
         start_date = st.date_input("Dari Tanggal:", value=date.today().replace(day=1), key="out_start")
@@ -944,15 +979,12 @@ def show_stock_out_report():
             if stock_out_data.empty:
                 st.info("Tidak ada data stok keluar dalam periode tersebut")
             else:
-                # Ringkasan
                 total_transaksi = len(stock_out_data)
                 
                 st.metric("Total Transaksi Keluar", total_transaksi)
                 
-                # Tabel detail
                 st.dataframe(stock_out_data, use_container_width=True)
                 
-                # Export CSV
                 csv = stock_out_data.to_csv(index=False)
                 st.download_button(
                     label="📥 Download CSV",
@@ -964,24 +996,58 @@ def show_stock_out_report():
     except Exception as e:
         st.error(f"Error generating stock out report: {e}")
 
+# ------------------ Additional Functions ------------------
+def add_sample_data():
+    """Tambahkan data sample untuk testing"""
+    try:
+        with get_connection() as conn:
+            c = conn.cursor()
+            
+            c.execute("SELECT COUNT(*) FROM barang")
+            if c.fetchone()[0] == 0:
+                sample_barang = [
+                    ("Pulpen Biru", "Alat Tulis", 100, 50),
+                    ("Kertas A4", "Kertas", 500, 200),
+                    ("Penggaris", "Alat Tulis", 25, 10)
+                ]
+                c.executemany("INSERT INTO barang (nama_barang, kategori, stok, minimum_stok) VALUES (?, ?, ?, ?)", 
+                             sample_barang)
+            
+            sample_requests = [
+                ("John Doe", "IT", 1, 5, "Untuk keperluan kantor", "pending"),
+                ("Jane Smith", "HR", 2, 10, "Untuk dokumentasi", "pending"),
+                ("Bob Wilson", "Finance", 3, 2, "Untuk laporan", "approved")
+            ]
+            
+            c.executemany("""INSERT INTO permintaan 
+                           (nama_karyawan, divisi, barang_id, jumlah, catatan, status) 
+                           VALUES (?, ?, ?, ?, ?, ?)""", sample_requests)
+            
+            conn.commit()
+            
+    except Exception as e:
+        st.error(f"Error menambahkan data sample: {e}")
+
 # ------------------ Main Application ------------------
 def main():
-    """Aplikasi utama"""
+    st.set_page_config(
+        page_title="Sistem Inventori ATK",
+        page_icon="📦",
+        layout="wide"
+    )
     
-    # Inisialisasi database
-    if not init_database():
-        st.stop()
+    if 'db_initialized' not in st.session_state:
+        st.write("🔄 Menginisialisasi database...")
+        init_database()
+        st.session_state.db_initialized = True
+        st.success("✅ Database berhasil diinisialisasi!")
     
-    # Sidebar navigation
     st.sidebar.title("🏢 Sistem Inventori ATK")
     
-    # Cek apakah user sudah login sebagai admin
     if 'admin' in st.session_state:
-        # Mode Admin
         st.sidebar.success(f"👋 {st.session_state.admin['nama']}")
         show_admin_dashboard()
     else:
-        # Mode Public
         menu = st.sidebar.radio("📍 Menu Utama:", [
             "🏠 Beranda",
             "📦 Lihat Stok",
@@ -1010,7 +1076,6 @@ def main():
             Jika ada pertanyaan, silakan hubungi admin sistem.
             """)
             
-            # Tampilkan ringkasan stok yang menipis
             df = get_barang_list()
             if not df.empty:
                 alert_items = df[df['stok'] <= df['minimum_stok']]
@@ -1034,7 +1099,6 @@ def main():
         elif menu == "🔐 Login Admin":
             show_admin_login()
     
-    # Footer
     st.sidebar.markdown("---")
     st.sidebar.markdown("💡 **Tips**: Pastikan permintaan Anda lengkap dan jelas")
     st.sidebar.markdown("📞 **Support**: Hubungi admin untuk bantuan")
